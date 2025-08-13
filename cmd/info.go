@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 var (
 	infoVersion string
 	infoVerbose bool
+	infoJSON    bool
 )
 
 var infoCmd = &cobra.Command{
@@ -34,13 +36,11 @@ Examples:
 func init() {
 	infoCmd.Flags().StringVar(&infoVersion, "version", "", "Show info for specific version")
 	infoCmd.Flags().BoolVarP(&infoVerbose, "verbose", "v", false, "Show detailed information")
+	infoCmd.Flags().BoolVar(&infoJSON, "json", false, "Output in JSON format")
 }
 
 func info(cmd *cobra.Command, args []string) error {
 	packageName := args[0]
-
-	fmt.Println(styling.Header("ℹ️   Package Information"))
-	fmt.Println(styling.Separator())
 
 	cfg := config.GetConfig()
 
@@ -78,6 +78,15 @@ func info(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse package information: %w", err)
 	}
 
+	// Handle JSON output
+	if infoJSON {
+		return outputJSON(packageInfo)
+	}
+
+	// Display formatted output
+	fmt.Println(styling.Header("ℹ️   Package Information"))
+	fmt.Println(styling.Separator())
+
 	// Display basic information
 	displayBasicInfo(packageInfo)
 
@@ -109,8 +118,31 @@ func displayBasicInfo(pkg map[string]interface{}) {
 		fmt.Printf("%s %s\n", styling.Label("Display Name:"), styling.Value(displayName))
 	}
 
-	if license := getStringField(pkg, "license"); license != "" {
-		fmt.Printf("%s %s\n", styling.Label("License:"), styling.Value(license))
+	// Show dist-tags
+	if distTags := getMapField(pkg, "dist-tags"); len(distTags) > 0 {
+		fmt.Printf("%s", styling.Label("Dist-tags:"))
+		first := true
+		for tag, version := range distTags {
+			if !first {
+				fmt.Printf(",")
+			}
+			fmt.Printf(" %s: %s", styling.Version(tag), styling.Value(version.(string)))
+			first = false
+		}
+		fmt.Println()
+	}
+
+	// Show modification dates
+	if created := getStringField(pkg, "created"); created != "" {
+		if parsedTime, err := time.Parse(time.RFC3339, created); err == nil {
+			fmt.Printf("%s %s\n", styling.Label("Created:"), styling.Value(parsedTime.Format("2006-01-02 15:04:05")))
+		}
+	}
+
+	if modified := getStringField(pkg, "modified"); modified != "" {
+		if parsedTime, err := time.Parse(time.RFC3339, modified); err == nil {
+			fmt.Printf("%s %s\n", styling.Label("Modified:"), styling.Value(parsedTime.Format("2006-01-02 15:04:05")))
+		}
 	}
 
 	fmt.Println()
@@ -176,6 +208,27 @@ func displayVersionDetails(versionInfo map[string]interface{}) {
 		}
 	}
 
+	// Show all maintainers
+	if maintainers := getArrayOfObjects(versionInfo, "maintainers"); len(maintainers) > 0 {
+		fmt.Printf("%s", styling.Label("Maintainers:"))
+		for i, maintainer := range maintainers {
+			if i > 0 {
+				fmt.Printf(",")
+			}
+			name := getStringField(maintainer, "name")
+			email := getStringField(maintainer, "email")
+			fmt.Printf(" %s", styling.Value(name))
+			if email != "" {
+				fmt.Printf(" <%s>", styling.Muted(email))
+			}
+		}
+		fmt.Println()
+	}
+
+	if license := getStringField(versionInfo, "license"); license != "" {
+		fmt.Printf("%s %s\n", styling.Label("License:"), styling.Value(license))
+	}
+
 	if homepage := getStringField(versionInfo, "homepage"); homepage != "" {
 		fmt.Printf("%s %s\n", styling.Label("Homepage:"), styling.URL(homepage))
 	}
@@ -192,6 +245,30 @@ func displayVersionDetails(versionInfo map[string]interface{}) {
 
 	if unity := getStringField(versionInfo, "unity"); unity != "" {
 		fmt.Printf("%s %s\n", styling.Label("Unity Version:"), styling.Value(unity))
+	}
+
+	// Display dist information
+	if dist := getMapField(versionInfo, "dist"); dist != nil {
+		fmt.Printf("\n%s\n", styling.SubHeader("Distribution:"))
+
+		if tarball := getStringField(dist, "tarball"); tarball != "" {
+			fmt.Printf("  %s %s\n", styling.Label("Tarball:"), styling.URL(tarball))
+		}
+
+		if integrity := getStringField(dist, "integrity"); integrity != "" {
+			fmt.Printf("  %s %s\n", styling.Label("Integrity:"), styling.Value(integrity))
+		}
+
+		if size := dist["size"]; size != nil {
+			if sizeFloat, ok := size.(float64); ok {
+				fmt.Printf("  %s %s\n", styling.Label("Size:"), styling.Value(formatSize(int64(sizeFloat))))
+			}
+		}
+	}
+
+	// Check for deprecation
+	if deprecated := getStringField(versionInfo, "deprecated"); deprecated != "" {
+		fmt.Printf("\n%s %s\n", styling.Error("⚠️  DEPRECATED:"), styling.Value(deprecated))
 	}
 
 	// Display dependencies
@@ -216,25 +293,50 @@ func displayDetailedInfo(pkg map[string]interface{}) {
 		return
 	}
 
-	for version, versionData := range versions {
-		versionMap, ok := versionData.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		fmt.Printf("  %s", styling.Version(version))
-
-		if created := getStringField(versionMap, "created"); created != "" {
-			if parsedTime, err := time.Parse(time.RFC3339, created); err == nil {
-				fmt.Printf(" (%s)", styling.Muted(parsedTime.Format("2006-01-02")))
+	// Show time information from package level
+	if timeInfo := getMapField(pkg, "time"); len(timeInfo) > 0 {
+		fmt.Printf("\n%s\n", styling.SubHeader("Version History:"))
+		for version, timestamp := range timeInfo {
+			if version == "created" || version == "modified" {
+				continue
 			}
-		}
+			fmt.Printf("  %s", styling.Version(version))
+			if timeStr, ok := timestamp.(string); ok {
+				if parsedTime, err := time.Parse(time.RFC3339, timeStr); err == nil {
+					fmt.Printf(" - %s", styling.Muted(parsedTime.Format("2006-01-02 15:04:05")))
+				}
+			}
 
-		if deprecated := getStringField(versionMap, "deprecated"); deprecated != "" {
-			fmt.Printf(" %s", styling.Error("[DEPRECATED]"))
+			// Check if this version is deprecated
+			if versionData, ok := versions[version].(map[string]interface{}); ok {
+				if deprecated := getStringField(versionData, "deprecated"); deprecated != "" {
+					fmt.Printf(" %s", styling.Error("[DEPRECATED]"))
+				}
+			}
+			fmt.Println()
 		}
+	} else {
+		// Fallback to old format
+		for version, versionData := range versions {
+			versionMap, ok := versionData.(map[string]interface{})
+			if !ok {
+				continue
+			}
 
-		fmt.Println()
+			fmt.Printf("  %s", styling.Version(version))
+
+			if created := getStringField(versionMap, "created"); created != "" {
+				if parsedTime, err := time.Parse(time.RFC3339, created); err == nil {
+					fmt.Printf(" (%s)", styling.Muted(parsedTime.Format("2006-01-02")))
+				}
+			}
+
+			if deprecated := getStringField(versionMap, "deprecated"); deprecated != "" {
+				fmt.Printf(" %s", styling.Error("[DEPRECATED]"))
+			}
+
+			fmt.Println()
+		}
 	}
 }
 
@@ -263,4 +365,36 @@ func getArrayField(m map[string]interface{}, key string) []string {
 		return result
 	}
 	return nil
+}
+
+func getArrayOfObjects(m map[string]interface{}, key string) []map[string]interface{} {
+	if val, ok := m[key].([]interface{}); ok {
+		var result []map[string]interface{}
+		for _, item := range val {
+			if obj, ok := item.(map[string]interface{}); ok {
+				result = append(result, obj)
+			}
+		}
+		return result
+	}
+	return nil
+}
+
+func formatSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func outputJSON(packageInfo map[string]interface{}) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(packageInfo)
 }

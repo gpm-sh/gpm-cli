@@ -6,7 +6,6 @@ import (
 
 func AddCommands(rootCmd *cobra.Command) {
 	rootCmd.AddCommand(loginCmd)
-	rootCmd.AddCommand(registerCmd)
 	rootCmd.AddCommand(logoutCmd)
 	rootCmd.AddCommand(whoamiCmd)
 	rootCmd.AddCommand(publishCmd)
@@ -19,4 +18,6 @@ func AddCommands(rootCmd *cobra.Command) {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(updateCmd)
 }

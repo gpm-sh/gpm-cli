@@ -31,7 +31,8 @@ type Client struct {
 type PublishRequest struct {
 	Name        string   `json:"name"`
 	Version     string   `json:"version"`
-	Visibility  string   `json:"visibility"`
+	Access      string   `json:"access"`
+	Tag         string   `json:"tag,omitempty"`
 	Studio      string   `json:"studio,omitempty"`
 	Description string   `json:"description,omitempty"`
 	Keywords    []string `json:"keywords,omitempty"`
@@ -64,8 +65,8 @@ type PublishResponse struct {
 type LoginRequest struct {
 	Name     string `json:"name"`
 	Password string `json:"password"`
-	Email    string `json:"email"`
-	Type     string `json:"type"`
+	Email    string `json:"email,omitempty"`
+	Type     string `json:"type,omitempty"`
 }
 
 type RegisterRequest struct {
@@ -76,12 +77,10 @@ type RegisterRequest struct {
 }
 
 type LoginResponse struct {
+	OK    bool   `json:"ok"`
+	ID    string `json:"id"`
+	Rev   string `json:"rev"`
 	Token string `json:"token"`
-	User  struct {
-		ID       string `json:"id"`
-		Username string `json:"username"`
-		Email    string `json:"email"`
-	} `json:"user"`
 }
 
 type RegisterResponse struct {
@@ -100,20 +99,8 @@ type ErrorResponse struct {
 }
 
 type WhoamiResponse struct {
-	User struct {
-		ID       string `json:"id"`
-		Username string `json:"username"`
-		Email    string `json:"email"`
-	} `json:"user"`
-	Studio struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Slug string `json:"slug"`
-	} `json:"studio,omitempty"`
-	Plan struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"plan,omitempty"`
+	Username string `json:"username"`
+	Studio   string `json:"studio"`
 }
 
 func NewClient(baseURL, token string) *Client {
@@ -128,6 +115,26 @@ func NewClient(baseURL, token string) *Client {
 
 func (c *Client) SetToken(token string) {
 	c.token = token
+}
+
+func (c *Client) GetPackageInfo(name, version string) (*PackageInfo, error) {
+	endpoint := fmt.Sprintf("/-/v1/packages/%s", name)
+	if version != "" && version != "latest" {
+		endpoint = fmt.Sprintf("/-/v1/packages/%s/%s", name, version)
+	}
+
+	resp, err := c.makeRequest("GET", endpoint, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var info PackageInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("failed to decode package info: %w", err)
+	}
+
+	return &info, nil
 }
 
 func (c *Client) Login(req *LoginRequest) (*LoginResponse, error) {
@@ -216,8 +223,9 @@ func (c *Client) Publish(req *PublishRequest, tarballPath string) (*PublishRespo
 
 	// Create npm publish format request using the actual package.json data
 	npmRequest := map[string]interface{}{
-		"_id":  packageInfo.Name,
-		"name": packageInfo.Name,
+		"_id":    packageInfo.Name,
+		"name":   packageInfo.Name,
+		"access": req.Access,
 		"versions": map[string]interface{}{
 			packageInfo.Version: packageInfo.RawData,
 		},

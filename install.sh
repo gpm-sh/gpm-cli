@@ -87,18 +87,19 @@ detect_platform() {
     echo "${os}_${arch}"
 }
 
-# Get latest release version
+# Get latest release version (including pre-releases)
 get_latest_version() {
-    print_status "Fetching latest release information..."
+    # Output status to stderr so it doesn't interfere with version capture
+    print_status "Fetching latest release information..." >&2
     
-    local api_url="https://api.github.com/repos/${REPO}/releases/latest"
+    local api_url="https://api.github.com/repos/${REPO}/releases"
     
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$api_url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+        curl -fsSL "$api_url" | grep '"tag_name":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/'
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO- "$api_url" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+        wget -qO- "$api_url" | grep '"tag_name":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/'
     else
-        print_error "Neither curl nor wget is available. Please install one of them."
+        print_error "Neither curl nor wget is available. Please install one of them." >&2
         exit 1
     fi
 }
@@ -108,31 +109,35 @@ install_binary() {
     local version=$1
     local platform=$2
     local temp_dir=$(mktemp -d)
-    local archive_name="gpm-cli_${version#v}_${platform}.tar.gz"
-    local download_url="https://github.com/${REPO}/releases/download/${version}/${archive_name}"
+    # Convert platform format: darwin_arm64 -> darwin-arm64
+    local platform_fixed=$(echo "$platform" | sed 's/_/-/g')
+    local binary_name="gpm-${platform_fixed}"
+    
+    # Add .exe extension for Windows
+    if [[ "$platform" == *"windows"* ]]; then
+        binary_name="${binary_name}.exe"
+    fi
+    local download_url="https://github.com/${REPO}/releases/download/${version}/${binary_name}"
 
     print_status "Downloading GPM CLI ${version} for ${platform}..."
     
-    # Download the archive
+    # Download the binary directly
     if command -v curl >/dev/null 2>&1; then
-        if ! curl -fsSL "$download_url" -o "${temp_dir}/${archive_name}"; then
+        if ! curl -fsSL "$download_url" -o "${temp_dir}/${BINARY_NAME}"; then
             print_error "Failed to download GPM CLI"
             exit 1
         fi
     elif command -v wget >/dev/null 2>&1; then
-        if ! wget -q "$download_url" -O "${temp_dir}/${archive_name}"; then
+        if ! wget -q "$download_url" -O "${temp_dir}/${BINARY_NAME}"; then
             print_error "Failed to download GPM CLI"
             exit 1
         fi
     fi
 
-    print_status "Extracting archive..."
+    print_status "Binary downloaded successfully..."
     
-    # Extract the archive
-    if ! tar -xzf "${temp_dir}/${archive_name}" -C "$temp_dir"; then
-        print_error "Failed to extract archive"
-        exit 1
-    fi
+    # Make binary executable
+    chmod +x "${temp_dir}/${BINARY_NAME}"
 
     # Determine install directory
     local install_path="$INSTALL_DIR"

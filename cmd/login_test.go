@@ -14,7 +14,6 @@ import (
 )
 
 func TestLoginCmd(t *testing.T) {
-	// Test command structure
 	assert.Equal(t, "login", loginCmd.Use)
 	assert.Equal(t, "Login to GPM registry", loginCmd.Short)
 	assert.NotNil(t, loginCmd.RunE)
@@ -31,16 +30,10 @@ func TestLoginFunction(t *testing.T) {
 		{
 			name: "successful login",
 			serverResponse: api.LoginResponse{
+				OK:    true,
+				ID:    "org.couchdb.user:testuser",
+				Rev:   "1",
 				Token: "test-token-123",
-				User: struct {
-					ID       string `json:"id"`
-					Username string `json:"username"`
-					Email    string `json:"email"`
-				}{
-					ID:       "user-123",
-					Username: "testuser",
-					Email:    "test@example.com",
-				},
 			},
 			serverStatus:  http.StatusOK,
 			expectError:   false,
@@ -89,8 +82,6 @@ func TestLoginFunction(t *testing.T) {
 			loginReq := &api.LoginRequest{
 				Name:     "testuser",
 				Password: "testpass",
-				Email:    "test@example.com",
-				Type:     "studio",
 			}
 
 			result, err := client.Login(loginReq)
@@ -100,7 +91,8 @@ func TestLoginFunction(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedToken, result.Token)
-				assert.Equal(t, tt.serverResponse.User.Username, result.User.Username)
+				assert.Equal(t, tt.serverResponse.OK, result.OK)
+				assert.Equal(t, tt.serverResponse.ID, result.ID)
 			}
 		})
 	}

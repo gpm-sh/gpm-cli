@@ -17,7 +17,7 @@ import (
 
 func TestPublishCmd(t *testing.T) {
 	// Test command structure
-	assert.Equal(t, "publish [tarball]", publishCmd.Use)
+	assert.Equal(t, "publish [package-spec]", publishCmd.Use)
 	assert.Equal(t, "Publish a package to GPM registry", publishCmd.Short)
 	assert.NotNil(t, publishCmd.RunE)
 }
@@ -246,5 +246,5 @@ func TestPublishCmdStructure(t *testing.T) {
 	// Verify command is properly registered
 	publishSubCmd := cmd.Commands()
 	require.Len(t, publishSubCmd, 1)
-	assert.Equal(t, "publish [tarball]", publishSubCmd[0].Use)
+	assert.Equal(t, "publish [package-spec]", publishSubCmd[0].Use)
 }

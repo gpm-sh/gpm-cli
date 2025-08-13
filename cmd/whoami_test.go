@@ -33,31 +33,8 @@ func TestWhoamiFunction(t *testing.T) {
 			name:  "successful whoami with studio",
 			token: "valid-token",
 			serverResponse: api.WhoamiResponse{
-				User: struct {
-					ID       string `json:"id"`
-					Username string `json:"username"`
-					Email    string `json:"email"`
-				}{
-					ID:       "user-123",
-					Username: "testuser",
-					Email:    "test@example.com",
-				},
-				Studio: struct {
-					ID   string `json:"id"`
-					Name string `json:"name"`
-					Slug string `json:"slug"`
-				}{
-					ID:   "studio-123",
-					Name: "Test Studio",
-					Slug: "test-studio",
-				},
-				Plan: struct {
-					ID   string `json:"id"`
-					Name string `json:"name"`
-				}{
-					ID:   "plan-pro",
-					Name: "Pro",
-				},
+				Username: "testuser",
+				Studio:   "test-studio",
 			},
 			serverStatus: http.StatusOK,
 			expectError:  false,
@@ -67,15 +44,8 @@ func TestWhoamiFunction(t *testing.T) {
 			name:  "successful whoami without studio",
 			token: "valid-token",
 			serverResponse: api.WhoamiResponse{
-				User: struct {
-					ID       string `json:"id"`
-					Username string `json:"username"`
-					Email    string `json:"email"`
-				}{
-					ID:       "user-456",
-					Username: "globaluser",
-					Email:    "global@example.com",
-				},
+				Username: "globaluser",
+				Studio:   "",
 			},
 			serverStatus: http.StatusOK,
 			expectError:  false,
@@ -145,18 +115,10 @@ func TestWhoamiFunction(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedUser, result.User.Username)
+				assert.Equal(t, tt.expectedUser, result.Username)
 
 				// Test studio information if present
-				if tt.serverResponse.Studio.Name != "" {
-					assert.Equal(t, tt.serverResponse.Studio.Name, result.Studio.Name)
-					assert.Equal(t, tt.serverResponse.Studio.Slug, result.Studio.Slug)
-				}
-
-				// Test plan information if present
-				if tt.serverResponse.Plan.Name != "" {
-					assert.Equal(t, tt.serverResponse.Plan.Name, result.Plan.Name)
-				}
+				assert.Equal(t, tt.serverResponse.Studio, result.Studio)
 			}
 		})
 	}

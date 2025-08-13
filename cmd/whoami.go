@@ -35,24 +35,12 @@ func whoami() error {
 
 	fmt.Println(styling.Header("User Information"))
 	fmt.Println(styling.Separator())
-	fmt.Printf("%s %s\n", styling.Label("ID:"), styling.Value(resp.User.ID))
-	fmt.Printf("%s %s\n", styling.Label("Username:"), styling.Value(resp.User.Username))
-	fmt.Printf("%s %s\n", styling.Label("Email:"), styling.Value(resp.User.Email))
+	fmt.Printf("%s %s\n", styling.Label("Username:"), styling.Value(resp.Username))
 
-	if resp.Studio.ID != "" {
-		fmt.Println(styling.Separator())
-		fmt.Println(styling.SubHeader("Studio Information"))
-		fmt.Printf("%s %s\n", styling.Label("Studio ID:"), styling.Value(resp.Studio.ID))
-		fmt.Printf("%s %s\n", styling.Label("Studio Name:"), styling.Value(resp.Studio.Name))
-		fmt.Printf("%s %s\n", styling.Label("Studio Slug:"), styling.Value(resp.Studio.Slug))
+	if resp.Studio != "" {
+		fmt.Printf("%s %s\n", styling.Label("Studio:"), styling.Value(resp.Studio))
 	}
 
-	if resp.Plan.ID != "" {
-		fmt.Println(styling.Separator())
-		fmt.Println(styling.SubHeader("Plan Information"))
-		fmt.Printf("%s %s\n", styling.Label("Plan ID:"), styling.Value(resp.Plan.ID))
-		fmt.Printf("%s %s\n", styling.Label("Plan Name:"), styling.Value(resp.Plan.Name))
-	}
-
+	fmt.Println(styling.Separator())
 	return nil
 }

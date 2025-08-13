@@ -31,20 +31,12 @@ func TestClient_Login(t *testing.T) {
 			loginReq: &LoginRequest{
 				Name:     "testuser",
 				Password: "testpass",
-				Email:    "test@example.com",
-				Type:     "studio",
 			},
 			serverResponse: LoginResponse{
+				OK:    true,
+				ID:    "org.couchdb.user:testuser",
+				Rev:   "1",
 				Token: "auth-token-123",
-				User: struct {
-					ID       string `json:"id"`
-					Username string `json:"username"`
-					Email    string `json:"email"`
-				}{
-					ID:       "user-123",
-					Username: "testuser",
-					Email:    "test@example.com",
-				},
 			},
 			serverStatus: http.StatusOK,
 			expectError:  false,
@@ -54,8 +46,6 @@ func TestClient_Login(t *testing.T) {
 			loginReq: &LoginRequest{
 				Name:     "testuser",
 				Password: "wrongpass",
-				Email:    "test@example.com",
-				Type:     "studio",
 			},
 			serverResponse: LoginResponse{}, // Empty response for error case
 			serverStatus:   http.StatusUnauthorized,
@@ -95,7 +85,8 @@ func TestClient_Login(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.serverResponse.Token, result.Token)
-				assert.Equal(t, tt.serverResponse.User.Username, result.User.Username)
+				assert.Equal(t, tt.serverResponse.OK, result.OK)
+				assert.Equal(t, tt.serverResponse.ID, result.ID)
 			}
 		})
 	}

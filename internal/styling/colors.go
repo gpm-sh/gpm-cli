@@ -192,3 +192,7 @@ func Progress(current, total int) string {
 func Hint(text string) string {
 	return Colorize(Dim+Italic, fmt.Sprintf("💡 %s", text))
 }
+
+func Subtle(text string) string {
+	return Colorize(Dim, text)
+}
