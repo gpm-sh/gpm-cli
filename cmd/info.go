@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -44,8 +45,14 @@ func info(cmd *cobra.Command, args []string) error {
 	cfg := config.GetConfig()
 
 	// Fetch package metadata
-	url := fmt.Sprintf("%s/%s", cfg.Registry, packageName)
-	resp, err := http.Get(url)
+	baseURL, err := url.Parse(cfg.Registry)
+	if err != nil {
+		return fmt.Errorf("%s\n\n%s",
+			styling.Error("Invalid registry URL: "+err.Error()),
+			styling.Hint("Check your registry URL with 'gpm config get registry'"))
+	}
+	packageURL := baseURL.JoinPath(packageName).String()
+	resp, err := http.Get(packageURL)
 	if err != nil {
 		return fmt.Errorf("%s\n\n%s",
 			styling.Error("Failed to fetch package information: "+err.Error()),

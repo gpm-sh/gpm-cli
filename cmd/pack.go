@@ -31,7 +31,15 @@ var packCmd = &cobra.Command{
 }
 
 func readPackageJSON(filename string) (*PackageInfo, error) {
-	data, err := os.ReadFile(filename)
+	// Security: Validate that the file is named package.json
+	if filepath.Base(filename) != "package.json" {
+		return nil, fmt.Errorf("invalid filename: only package.json is allowed")
+	}
+
+	// Security: Clean the path to prevent directory traversal
+	cleanPath := filepath.Clean(filename)
+
+	data, err := os.ReadFile(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", filename, err)
 	}

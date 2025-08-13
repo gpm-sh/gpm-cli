@@ -2,7 +2,7 @@ package api
 
 import (
 	"bytes"
-	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
@@ -297,7 +297,7 @@ func extractPackageInfo(tarballPath string) (*PackageInfo, error) {
 			// Add dist information to the raw data
 			rawData["dist"] = map[string]interface{}{
 				"integrity": fmt.Sprintf("sha512-%s", generateSHA512(data)),
-				"shasum":    generateSHA1(data),
+				"shasum":    generateSHA256(data),
 				"tarball":   fmt.Sprintf("https://registry.npmjs.org/%s/-/%s-%s.tgz", packageInfo.Name, packageInfo.Name, packageInfo.Version),
 			}
 
@@ -316,9 +316,9 @@ func generateSHA512(data []byte) string {
 	return base64.StdEncoding.EncodeToString(hash[:])
 }
 
-// Helper function to generate SHA1 hash
-func generateSHA1(data []byte) string {
-	hash := sha1.Sum(data)
+// Helper function to generate SHA256 hash
+func generateSHA256(data []byte) string {
+	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
 }
 
@@ -353,7 +353,7 @@ func (c *Client) makeRequest(method, endpoint string, body []byte, headers map[s
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		var apiError struct {
 			Error struct {

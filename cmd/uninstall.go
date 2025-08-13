@@ -141,5 +141,5 @@ func removeFromPackageJSON(packageName string, fromDevDeps bool) error {
 		return fmt.Errorf("failed to marshal package.json: %w", err)
 	}
 
-	return os.WriteFile(packageJSONPath, updatedData, 0644)
+	return os.WriteFile(packageJSONPath, updatedData, 0600)
 }

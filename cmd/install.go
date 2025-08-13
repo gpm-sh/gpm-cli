@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,13 +156,17 @@ func downloadAndInstallPackage(packageName, version string, isDev bool) error {
 
 	// Create Packages directory if it doesn't exist
 	packagesDir := "Packages"
-	if err := os.MkdirAll(packagesDir, 0755); err != nil {
+	if err := os.MkdirAll(packagesDir, 0750); err != nil {
 		return fmt.Errorf("failed to create Packages directory: %w", err)
 	}
 
 	// Download package metadata
-	url := fmt.Sprintf("%s/%s", cfg.Registry, packageName)
-	resp, err := http.Get(url)
+	baseURL, err := url.Parse(cfg.Registry)
+	if err != nil {
+		return fmt.Errorf("invalid registry URL: %w", err)
+	}
+	packageURL := baseURL.JoinPath(packageName).String()
+	resp, err := http.Get(packageURL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch package metadata: %w", err)
 	}
@@ -185,7 +190,7 @@ func downloadAndInstallPackage(packageName, version string, isDev bool) error {
 		return fmt.Errorf("failed to create manifest: %w", err)
 	}
 
-	return os.WriteFile(manifestPath, manifestData, 0644)
+	return os.WriteFile(manifestPath, manifestData, 0600)
 }
 
 func updatePackageJSON(packageName, version string, isDev bool) error {
@@ -228,5 +233,5 @@ func updatePackageJSON(packageName, version string, isDev bool) error {
 		return fmt.Errorf("failed to marshal package.json: %w", err)
 	}
 
-	return os.WriteFile(packageJSONPath, updatedData, 0644)
+	return os.WriteFile(packageJSONPath, updatedData, 0600)
 }

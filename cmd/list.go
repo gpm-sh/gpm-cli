@@ -88,7 +88,13 @@ func listLocalPackages() error {
 			return nil
 		}
 
-		data, err := os.ReadFile(path)
+		// Validate path is within the expected directory structure
+		cleanPath := filepath.Clean(path)
+		if !strings.HasPrefix(cleanPath, packagesDir) {
+			return nil
+		}
+
+		data, err := os.ReadFile(cleanPath)
 		if err != nil {
 			return nil
 		}

@@ -46,10 +46,20 @@ func search(cmd *cobra.Command, args []string) error {
 	cfg := config.GetConfig()
 
 	// Build search URL
-	searchURL := fmt.Sprintf("%s/-/v1/search?text=%s", cfg.Registry, url.QueryEscape(searchTerm))
-	if searchLimit > 0 {
-		searchURL += fmt.Sprintf("&size=%d", searchLimit)
+	baseURL, err := url.Parse(cfg.Registry)
+	if err != nil {
+		return fmt.Errorf("%s\n\n%s",
+			styling.Error("Invalid registry URL: "+err.Error()),
+			styling.Hint("Check your registry URL with 'gpm config get registry'"))
 	}
+
+	searchURL := baseURL.JoinPath("/-/v1/search").String()
+	params := url.Values{}
+	params.Add("text", searchTerm)
+	if searchLimit > 0 {
+		params.Add("size", fmt.Sprintf("%d", searchLimit))
+	}
+	searchURL = fmt.Sprintf("%s?%s", searchURL, params.Encode())
 
 	resp, err := http.Get(searchURL)
 	if err != nil {

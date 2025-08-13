@@ -56,10 +56,10 @@ func CreateTempPackage(t *testing.T, name, version string) string {
 
 	data, err := json.MarshalIndent(packageJSON, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "package.json"), data, 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "package.json"), data, 0600))
 
 	runtimeDir := filepath.Join(tmpDir, "Runtime", "Scripts")
-	require.NoError(t, os.MkdirAll(runtimeDir, 0755))
+	require.NoError(t, os.MkdirAll(runtimeDir, 0750))
 
 	script := `using UnityEngine;
 
@@ -73,7 +73,7 @@ namespace TestPackage
         }
     }
 }`
-	require.NoError(t, os.WriteFile(filepath.Join(runtimeDir, "TestScript.cs"), []byte(script), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(runtimeDir, "TestScript.cs"), []byte(script), 0600))
 
 	return tmpDir
 }
@@ -96,7 +96,7 @@ func CreateTempConfig(t *testing.T, registry, token, username string) string {
 		}
 	}
 
-	require.NoError(t, os.WriteFile(configFile, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(configFile, []byte(content), 0600))
 	return tmpDir
 }
 
