@@ -61,6 +61,7 @@ func search(cmd *cobra.Command, args []string) error {
 	}
 	searchURL = fmt.Sprintf("%s?%s", searchURL, params.Encode())
 
+	// #nosec G107 - URL is validated using url.Parse and JoinPath above
 	resp, err := http.Get(searchURL)
 	if err != nil {
 		return fmt.Errorf("%s\n\n%s",

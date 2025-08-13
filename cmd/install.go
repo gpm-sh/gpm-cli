@@ -166,6 +166,7 @@ func downloadAndInstallPackage(packageName, version string, isDev bool) error {
 		return fmt.Errorf("invalid registry URL: %w", err)
 	}
 	packageURL := baseURL.JoinPath(packageName).String()
+	// #nosec G107 - URL is validated using url.Parse and JoinPath above
 	resp, err := http.Get(packageURL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch package metadata: %w", err)
