@@ -45,13 +45,14 @@ func ValidatePackage(path string) (*ValidationResult, error) {
 	// Security: Clean the path and validate it's safe
 	cleanPath := filepath.Clean(path)
 	packagePath := filepath.Join(cleanPath, "package.json")
+	cleanPackagePath := filepath.Clean(packagePath)
 
 	// Security: Ensure the resulting path is still within the expected directory
-	if !strings.HasPrefix(packagePath, cleanPath) {
+	if !strings.HasPrefix(cleanPackagePath, cleanPath) {
 		return nil, fmt.Errorf("invalid path: potential directory traversal")
 	}
 
-	data, err := os.ReadFile(packagePath)
+	data, err := os.ReadFile(cleanPackagePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read package.json: %w", err)
 	}
