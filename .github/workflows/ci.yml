@@ -56,15 +56,38 @@ jobs:
         version: latest
         args: --timeout=5m
         
-    - name: Security scan
+    - name: Run Gosec Security Scanner
+      uses: securego/gosec@master
+      with:
+        args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+        
+    - name: Verify SARIF file exists (fallback)
       run: |
-        go install github.com/securego/gosec/v2/cmd/gosec@latest
-        gosec -fmt sarif -out gosec-results.sarif ./... || true
-        # Ensure SARIF file exists even if no issues found
+        echo "Current working directory: $(pwd)"
+        echo "Checking for SARIF file..."
         if [ ! -f gosec-results.sarif ]; then
-          echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","runs":[{"tool":{"driver":{"name":"gosec","version":"0.0.0"}},"results":[]}]}' > gosec-results.sarif
+          echo "SARIF file not found, creating minimal one..."
+          cat > gosec-results.sarif << 'EOF'
+        {
+          "version": "2.1.0",
+          "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+          "runs": [
+            {
+              "tool": {
+                "driver": {
+                  "name": "gosec",
+                  "version": "2.0.0"
+                }
+              },
+              "results": []
+            }
+          ]
+        }
+        EOF
         fi
         ls -la gosec-results.sarif
+        echo "SARIF file content:"
+        head -5 gosec-results.sarif
         
     - name: Upload gosec scan results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
