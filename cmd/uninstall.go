@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"gpm.sh/gpm/gpm-cli/internal/styling"
@@ -52,10 +53,26 @@ func uninstallLocalPackage(packageName string) error {
 	fmt.Printf("%s %s\n", styling.Label("Removing:"), styling.Package(packageName))
 
 	packagesDir := "Packages"
+
+	// Security: Validate package name format
+	if !isValidPackageName(packageName) {
+		return fmt.Errorf("%s\n\n%s",
+			styling.Error("Invalid package name: "+packageName),
+			styling.Hint("Package names should follow reverse-DNS convention"))
+	}
+
 	manifestPath := filepath.Join(packagesDir, packageName+".json")
 
+	// Security: Ensure the path is still within the packages directory
+	cleanPath := filepath.Clean(manifestPath)
+	if !strings.HasPrefix(cleanPath, packagesDir) {
+		return fmt.Errorf("%s\n\n%s",
+			styling.Error("Invalid package path"),
+			styling.Hint("Package path must be within the Packages directory"))
+	}
+
 	// Check if package is installed
-	if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+	if _, err := os.Stat(cleanPath); os.IsNotExist(err) {
 		return fmt.Errorf("%s\n\n%s",
 			styling.Error("Package not installed: "+packageName),
 			styling.Hint("Use 'gpm list' to see installed packages"))
@@ -63,7 +80,7 @@ func uninstallLocalPackage(packageName string) error {
 
 	// Read package manifest to get version info
 	var packageVersion string
-	if data, err := os.ReadFile(manifestPath); err == nil {
+	if data, err := os.ReadFile(cleanPath); err == nil {
 		var manifest struct {
 			Version string `json:"version"`
 		}
@@ -142,4 +159,26 @@ func removeFromPackageJSON(packageName string, fromDevDeps bool) error {
 	}
 
 	return os.WriteFile(packageJSONPath, updatedData, 0600)
+}
+
+// isValidPackageName checks if a package name follows valid naming conventions
+func isValidPackageName(name string) bool {
+	// Basic validation for reverse-DNS format or npm-compatible names
+	// Allow letters, numbers, dots, hyphens, and underscores
+	for _, char := range name {
+		if !((char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '.' || char == '-' || char == '_') {
+			return false
+		}
+	}
+
+	// Must not be empty and must not start/end with special characters
+	if len(name) == 0 || name[0] == '.' || name[0] == '-' ||
+		name[len(name)-1] == '.' || name[len(name)-1] == '-' {
+		return false
+	}
+
+	return true
 }

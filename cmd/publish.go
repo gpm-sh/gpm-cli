@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"gpm.sh/gpm/gpm-cli/internal/api"
@@ -77,7 +79,13 @@ func publish(tarballPath string) error {
 }
 
 func extractPackageInfo(tarballPath string) (*PackageInfo, error) {
-	file, err := os.Open(tarballPath)
+	// Security: Validate the tarball path
+	cleanPath := filepath.Clean(tarballPath)
+	if !strings.HasSuffix(cleanPath, ".tgz") && !strings.HasSuffix(cleanPath, ".tar.gz") {
+		return nil, fmt.Errorf("invalid file type: only .tgz and .tar.gz files are allowed")
+	}
+
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, err
 	}

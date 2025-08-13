@@ -62,9 +62,15 @@ func packPackage(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to read package.json: %w", err)
 	}
 
-	outputFile := fmt.Sprintf("%s-%s.tgz", packageInfo.Name, packageInfo.Version)
+	// Security: Validate package name and version for safe filename
+	if !isValidPackageNameForFilename(packageInfo.Name) || !isValidVersionForFilename(packageInfo.Version) {
+		return fmt.Errorf("invalid package name or version for filename")
+	}
 
-	file, err := os.Create(outputFile)
+	outputFile := fmt.Sprintf("%s-%s.tgz", packageInfo.Name, packageInfo.Version)
+	cleanOutputFile := filepath.Clean(outputFile)
+
+	file, err := os.Create(cleanOutputFile)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
@@ -108,7 +114,10 @@ func packPackage(cmd *cobra.Command, args []string) error {
 		}
 
 		if !info.IsDir() {
-			fileData, err := os.ReadFile(path)
+			// Security: Clean and validate the file path
+			cleanPath := filepath.Clean(path)
+
+			fileData, err := os.ReadFile(cleanPath)
 			if err != nil {
 				return fmt.Errorf("failed to read file %s: %w", path, err)
 			}
@@ -149,4 +158,42 @@ func packPackage(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Ready to publish with: %s\n", styling.Command(fmt.Sprintf("gpm publish %s", outputFile)))
 
 	return nil
+}
+
+// isValidPackageNameForFilename checks if a package name is safe for use in filenames
+func isValidPackageNameForFilename(name string) bool {
+	if len(name) == 0 || len(name) > 214 {
+		return false
+	}
+
+	// Only allow alphanumeric, dots, hyphens, and underscores
+	for _, char := range name {
+		if !((char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '.' || char == '-' || char == '_') {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isValidVersionForFilename checks if a version string is safe for use in filenames
+func isValidVersionForFilename(version string) bool {
+	if len(version) == 0 || len(version) > 50 {
+		return false
+	}
+
+	// Only allow alphanumeric, dots, and hyphens (semantic versioning)
+	for _, char := range version {
+		if !((char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '.' || char == '-') {
+			return false
+		}
+	}
+
+	return true
 }

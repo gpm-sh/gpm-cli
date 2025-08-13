@@ -42,7 +42,15 @@ func ValidatePackage(path string) (*ValidationResult, error) {
 		Warnings: []string{},
 	}
 
-	packagePath := filepath.Join(path, "package.json")
+	// Security: Clean the path and validate it's safe
+	cleanPath := filepath.Clean(path)
+	packagePath := filepath.Join(cleanPath, "package.json")
+
+	// Security: Ensure the resulting path is still within the expected directory
+	if !strings.HasPrefix(packagePath, cleanPath) {
+		return nil, fmt.Errorf("invalid path: potential directory traversal")
+	}
+
 	data, err := os.ReadFile(packagePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read package.json: %w", err)
@@ -103,7 +111,7 @@ func validateVersion(version string) error {
 
 func validateUnityField(pkg *PackageJSON) error {
 	if pkg.Unity == "" && pkg.DisplayName == "" {
-		return fmt.Errorf("Unity package should include 'unity' or 'displayName' field for better UPM compatibility")
+		return fmt.Errorf("unity package should include 'unity' or 'displayName' field for better UPM compatibility")
 	}
 	return nil
 }

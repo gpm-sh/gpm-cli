@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -195,7 +196,13 @@ func (c *Client) Publish(req *PublishRequest, tarballPath string) (*PublishRespo
 		return nil, fmt.Errorf("failed to extract package info: %w", err)
 	}
 
-	file, err := os.Open(tarballPath)
+	// Security: Validate the tarball path
+	cleanPath := filepath.Clean(tarballPath)
+	if !strings.HasSuffix(cleanPath, ".tgz") && !strings.HasSuffix(cleanPath, ".tar.gz") {
+		return nil, fmt.Errorf("invalid file type: only .tgz and .tar.gz files are allowed")
+	}
+
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tarball: %w", err)
 	}
@@ -254,7 +261,13 @@ func (c *Client) Publish(req *PublishRequest, tarballPath string) (*PublishRespo
 }
 
 func extractPackageInfo(tarballPath string) (*PackageInfo, error) {
-	file, err := os.Open(tarballPath)
+	// Security: Validate the tarball path
+	cleanPath := filepath.Clean(tarballPath)
+	if !strings.HasSuffix(cleanPath, ".tgz") && !strings.HasSuffix(cleanPath, ".tar.gz") {
+		return nil, fmt.Errorf("invalid file type: only .tgz and .tar.gz files are allowed")
+	}
+
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, err
 	}
