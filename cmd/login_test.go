@@ -71,7 +71,7 @@ func TestLoginFunction(t *testing.T) {
 
 				w.WriteHeader(tt.serverStatus)
 				if tt.serverStatus == http.StatusOK {
-					json.NewEncoder(w).Encode(tt.serverResponse)
+					_ = json.NewEncoder(w).Encode(tt.serverResponse)
 				}
 			}))
 			defer server.Close()

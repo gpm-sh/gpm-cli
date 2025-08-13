@@ -80,7 +80,7 @@ func TestClient_Login(t *testing.T) {
 				// Send response
 				w.WriteHeader(tt.serverStatus)
 				if tt.serverStatus == http.StatusOK {
-					json.NewEncoder(w).Encode(tt.serverResponse)
+					_ = json.NewEncoder(w).Encode(tt.serverResponse)
 				}
 			}))
 			defer server.Close()
@@ -153,7 +153,7 @@ func TestClient_makeRequest(t *testing.T) {
 				}
 
 				w.WriteHeader(tt.serverStatus)
-				w.Write([]byte(`{"message": "test response"}`))
+				_, _ = w.Write([]byte(`{"message": "test response"}`))
 			}))
 			defer server.Close()
 

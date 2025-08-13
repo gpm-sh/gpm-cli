@@ -117,7 +117,7 @@ func WithTempDir(t *testing.T, fn func(string)) {
 
 	require.NoError(t, os.Chdir(tmpDir))
 	defer func() {
-		require.NoError(t, os.Chdir(oldWd))
+		_ = os.Chdir(oldWd)
 	}()
 
 	fn(tmpDir)

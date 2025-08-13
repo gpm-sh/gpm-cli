@@ -322,22 +322,6 @@ func generateSHA1(data []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// Helper function to get string value or default
-func getStringOrDefault(value, defaultValue string) string {
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-// Helper function to get string slice value or default
-func getStringSliceOrDefault(value []string, defaultValue []string) []string {
-	if value == nil || len(value) == 0 {
-		return defaultValue
-	}
-	return value
-}
-
 func (c *Client) makeRequest(method, endpoint string, body []byte, headers map[string]string) (*http.Response, error) {
 	url := c.baseURL + endpoint
 

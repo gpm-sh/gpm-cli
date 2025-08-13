@@ -118,7 +118,7 @@ public class TestScript : MonoBehaviour {
 			tmpDir := t.TempDir()
 			oldWd, _ := os.Getwd()
 			require.NoError(t, os.Chdir(tmpDir))
-			defer os.Chdir(oldWd)
+			defer func() { _ = os.Chdir(oldWd) }()
 
 			// Create test files
 			for path, content := range tt.setupFiles {

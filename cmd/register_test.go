@@ -84,7 +84,7 @@ func TestRegisterFunction(t *testing.T) {
 				}
 
 				w.WriteHeader(tt.serverStatus)
-				json.NewEncoder(w).Encode(tt.serverResponse)
+				_ = json.NewEncoder(w).Encode(tt.serverResponse)
 			}))
 			defer server.Close()
 

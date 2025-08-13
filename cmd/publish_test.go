@@ -71,7 +71,7 @@ func TestExtractPackageInfo(t *testing.T) {
 			// Create tarball using the pack function
 			oldWd, _ := os.Getwd()
 			require.NoError(t, os.Chdir(tmpDir))
-			defer os.Chdir(oldWd)
+			defer func() { _ = os.Chdir(oldWd) }()
 
 			// Create package.json in current dir (needed for pack)
 			require.NoError(t, os.WriteFile("package.json", []byte(tt.packageJSON), 0644))
@@ -189,7 +189,7 @@ func TestPublishFunction(t *testing.T) {
 				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 				w.WriteHeader(tt.serverStatus)
-				json.NewEncoder(w).Encode(tt.serverResponse)
+				_ = json.NewEncoder(w).Encode(tt.serverResponse)
 			}))
 			defer server.Close()
 
@@ -203,7 +203,7 @@ func TestPublishFunction(t *testing.T) {
 
 			oldWd, _ := os.Getwd()
 			require.NoError(t, os.Chdir(tmpDir))
-			defer os.Chdir(oldWd)
+			defer func() { _ = os.Chdir(oldWd) }()
 
 			require.NoError(t, os.WriteFile("package.json", []byte(packageJSON), 0644))
 			require.NoError(t, os.MkdirAll("Runtime/Scripts", 0755))
