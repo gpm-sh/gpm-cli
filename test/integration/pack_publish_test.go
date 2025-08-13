@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,7 +56,21 @@ func (s *PackPublishSuite) TearDownSuite() {
 func (s *PackPublishSuite) SetupTest() {
 	testDir := filepath.Join(s.tmpDir, "test-package")
 	require.NoError(s.T(), os.MkdirAll(testDir, 0755))
+	oldWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldWd) }()
 	require.NoError(s.T(), os.Chdir(testDir))
+}
+
+func (s *PackPublishSuite) TearDownTest() {
+	// Force garbage collection to help release file handles on Windows
+	runtime.GC()
+	time.Sleep(10 * time.Millisecond)
+
+	// Clean up any generated tarballs
+	tarball := "com.integration.test-package-1.0.0.tgz"
+	if _, err := os.Stat(tarball); err == nil {
+		_ = os.Remove(tarball)
+	}
 }
 
 func (s *PackPublishSuite) TestPackCommand() {
@@ -66,9 +82,9 @@ func (s *PackPublishSuite) TestPackCommand() {
 		"unity": "2022.3",
 		"license": "MIT"
 	}`
-	require.NoError(s.T(), os.WriteFile("package.json", []byte(packageJSON), 0644))
+	require.NoError(s.T(), os.WriteFile("package.json", []byte(packageJSON), 0600))
 
-	require.NoError(s.T(), os.MkdirAll("Runtime/Scripts", 0755))
+	require.NoError(s.T(), os.MkdirAll("Runtime/Scripts", 0750))
 	script := `using UnityEngine;
 
 namespace IntegrationTest
@@ -81,7 +97,7 @@ namespace IntegrationTest
         }
     }
 }`
-	require.NoError(s.T(), os.WriteFile("Runtime/Scripts/TestScript.cs", []byte(script), 0644))
+	require.NoError(s.T(), os.WriteFile("Runtime/Scripts/TestScript.cs", []byte(script), 0600))
 
 	cmd := exec.Command(s.gpmBinary, "pack")
 	output, err := cmd.CombinedOutput()
@@ -129,12 +145,12 @@ func (s *PackPublishSuite) createTestPackage() {
 		"unity": "2022.3",
 		"license": "MIT"
 	}`
-	require.NoError(s.T(), os.WriteFile("package.json", []byte(packageJSON), 0644))
+	require.NoError(s.T(), os.WriteFile("package.json", []byte(packageJSON), 0600))
 
-	require.NoError(s.T(), os.MkdirAll("Runtime/Scripts", 0755))
+	require.NoError(s.T(), os.MkdirAll("Runtime/Scripts", 0750))
 	script := `using UnityEngine;
 public class TestScript : MonoBehaviour { }`
-	require.NoError(s.T(), os.WriteFile("Runtime/Scripts/TestScript.cs", []byte(script), 0644))
+	require.NoError(s.T(), os.WriteFile("Runtime/Scripts/TestScript.cs", []byte(script), 0600))
 }
 
 func (s *PackPublishSuite) isServerAvailable() bool {

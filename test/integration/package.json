@@ -1,0 +1,8 @@
+{
+		"name": "com.integration.test-package",
+		"version": "1.0.0",
+		"displayName": "Integration Test Package",
+		"description": "A test package for integration testing",
+		"unity": "2022.3",
+		"license": "MIT"
+	}
