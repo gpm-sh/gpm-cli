@@ -16,6 +16,31 @@ A modern, secure command-line interface for the GPM (Game Package Manager) regis
 
 ## 📦 Installation
 
+### Quick Install (Recommended)
+
+**One-liner installation:**
+
+```bash
+# Using curl
+curl -fsSL https://gpm.sh/install.sh | bash
+
+# Using wget
+wget -qO- https://gpm.sh/install.sh | bash
+```
+
+**Custom installation:**
+
+```bash
+# Install specific version
+curl -fsSL https://gpm.sh/install.sh | bash -s -- -v v0.1.0-alpha.2
+
+# Install to custom directory
+curl -fsSL https://gpm.sh/install.sh | bash -s -- -d ~/.local/bin
+
+# Force reinstall
+curl -fsSL https://gpm.sh/install.sh | bash -s -- --force
+```
+
 ### Download Pre-built Binaries
 
 Download the latest release for your platform from the [releases page](https://github.com/gpm-sh/gpm-cli/releases).
