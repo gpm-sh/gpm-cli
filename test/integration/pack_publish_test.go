@@ -23,7 +23,13 @@ type PackPublishSuite struct {
 func (s *PackPublishSuite) SetupSuite() {
 	tmpDir := s.T().TempDir()
 	s.tmpDir = tmpDir
-	s.gpmBinary = filepath.Join(tmpDir, "gpm")
+
+	// Add .exe extension on Windows
+	binaryName := "gpm"
+	if filepath.Ext(os.Args[0]) == ".exe" {
+		binaryName = "gpm.exe"
+	}
+	s.gpmBinary = filepath.Join(tmpDir, binaryName)
 
 	workingDir, err := os.Getwd()
 	require.NoError(s.T(), err)
