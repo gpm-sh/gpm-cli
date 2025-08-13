@@ -71,8 +71,8 @@ func InitConfig() {
 		// Continue with defaults if unmarshaling fails
 	}
 
-	// Decrypt token if it exists and appears to be encrypted
-	if config.Token != "" {
+	// Decrypt token if it exists and appears to be encrypted (base64 encoded)
+	if config.Token != "" && isEncryptedToken(config.Token) {
 		if decryptedToken, err := decryptToken(config.Token); err == nil {
 			config.Token = decryptedToken
 		}
@@ -155,15 +155,7 @@ func GetRegistry() string {
 
 func GetToken() string {
 	cfg := GetConfig()
-	if cfg.Token == "" {
-		return ""
-	}
-
-	decryptedToken, err := decryptToken(cfg.Token)
-	if err != nil {
-		return cfg.Token
-	}
-	return decryptedToken
+	return cfg.Token
 }
 
 func GetUsername() string {
@@ -274,4 +266,21 @@ func getEncryptionKey() []byte {
 	keyMaterial := fmt.Sprintf("gpm-cli-%s-%s", username, hostname)
 	hash := sha256.Sum256([]byte(keyMaterial))
 	return hash[:]
+}
+
+// isEncryptedToken checks if a token appears to be encrypted (base64 encoded with appropriate length)
+func isEncryptedToken(token string) bool {
+	// Check if it's a valid base64 string and has reasonable length for encrypted data
+	if len(token) < 32 { // Minimum length for encrypted token with nonce
+		return false
+	}
+
+	// Try to decode as base64
+	data, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return false
+	}
+
+	// Check if decoded data has minimum expected length (nonce + some encrypted data)
+	return len(data) >= 16 // GCM nonce is 12 bytes + at least some encrypted data
 }
