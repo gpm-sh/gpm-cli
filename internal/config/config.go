@@ -45,10 +45,18 @@ func InitConfig() {
 	viper.SetConfigType("yaml")
 
 	// Set config file location to user's home directory
-	home, err := os.UserHomeDir()
-	if err != nil {
-		// If we can't get home dir, use current directory
-		viper.AddConfigPath(".")
+	// Check HOME environment variable first (for tests)
+	home := os.Getenv("HOME")
+	if home == "" {
+		// Fall back to os.UserHomeDir() if HOME is not set
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			// If we can't get home dir, use current directory
+			viper.AddConfigPath(".")
+		} else {
+			viper.AddConfigPath(home)
+		}
 	} else {
 		viper.AddConfigPath(home)
 	}
