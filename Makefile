@@ -35,7 +35,6 @@ deps:
 
 fmt:
 	go fmt ./...
-	goimports -w .
 
 lint:
 	golangci-lint run
