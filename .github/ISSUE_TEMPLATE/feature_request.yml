@@ -1,0 +1,152 @@
+name: ✨ Feature Request
+description: Suggest a new feature for GPM CLI
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest a new feature! Please fill out the form below.
+
+  - type: textarea
+    id: feature-description
+    attributes:
+      label: Feature Description
+      description: A clear and concise description of the feature you'd like to see
+      placeholder: I would like to see...
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? What is the current limitation?
+      placeholder: |
+        Currently, when I try to..., I have to...
+        This is frustrating because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: How do you envision this feature working?
+      placeholder: |
+        I would like to be able to...
+        The command could work like...
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-cases
+    attributes:
+      label: Use Cases
+      description: Describe specific scenarios where this feature would be useful
+      placeholder: |
+        1. When developing Unity packages...
+        2. In CI/CD pipelines...
+        3. For package maintainers...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other solutions have you considered?
+      placeholder: |
+        - I could use npm, but...
+        - Another approach might be...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: Feature Type
+      description: What type of feature is this?
+      options:
+        - New command
+        - Enhancement to existing command
+        - Configuration option
+        - Performance improvement
+        - Developer experience improvement
+        - Integration with external tool
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature to you?
+      options:
+        - Low - Nice to have
+        - Medium - Would significantly improve workflow
+        - High - Critical for adoption
+    validations:
+      required: true
+
+  - type: textarea
+    id: command-example
+    attributes:
+      label: Command Example
+      description: If this is a new command or flag, show how you imagine it would work
+      placeholder: |
+        $ gpm workspace init
+        $ gpm install --workspace
+        $ gpm publish --dry-run
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: implementation-ideas
+    attributes:
+      label: Implementation Ideas
+      description: |
+        Do you have any ideas about how this could be implemented?
+        (Optional - we appreciate any technical insights!)
+      placeholder: |
+        This could be implemented by...
+        Similar to how npm does...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: compatibility
+    attributes:
+      label: Compatibility Considerations
+      description: Please consider the following
+      options:
+        - label: This feature should maintain npm compatibility where possible
+        - label: This feature should work across all supported platforms (Windows, macOS, Linux)
+        - label: This feature should not break existing workflows
+        - label: I understand this feature may require a major version bump if it's breaking
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to help implement this feature
+        - label: I would be willing to help test this feature
+        - label: I would be willing to help write documentation for this feature
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: |
+        Any other context, mockups, or examples that would help us understand this feature request
+      placeholder: |
+        - Screenshots or mockups
+        - Links to similar features in other tools
+        - Any relevant documentation or specifications
+    validations:
+      required: false

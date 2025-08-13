@@ -1,32 +1,117 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
 # Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+gpm
+gpm-cli
+gpm-test
 
 # Test binary, built with `go test -c`
 *.test
 
-# Code coverage profiles and other test artifacts
+# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
-coverage.*
-*.coverprofile
-profile.cov
-
-# Dependency directories (remove the comment below to include it)
-# vendor/
 
 # Go workspace file
 go.work
-go.work.sum
 
-# env file
+# Build artifacts
+/dist/
+/coverage/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Package files
+*.tgz
+*.tar.gz
+
+# Local configuration (development only)
+.gpmrc.local
+config.local.*
+
+# Security and secrets
+*.pem
+*.key
+*.crt
+*.p12
 .env
+.env.local
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# Dependency directories
+vendor/
+
+# Test artifacts
+testdata/output/
+test-results/
+
+# Documentation build
+/docs/_build/
+/docs/.doctrees/
+
+# Backup files
+*.bak
+*.backup
+
+# Local development tools
+.air.toml
+.realize.yaml
+
+# Editor directories and files
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Vim
+*.swp
+*.swo
+Session.vim
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Coverage reports
+coverage.html
+coverage.xml
+coverage.txt
+
+# Benchmark results
+*.bench
+
+# Profiling data
+*.pprof
+*.prof
+
+# Local development
+.local/
+.cache/

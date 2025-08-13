@@ -1,0 +1,142 @@
+name: 🐛 Bug Report
+description: Report a bug to help us improve GPM CLI
+title: "[Bug]: "
+labels: ["bug", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this bug! Please fill out the form below to help us understand and fix the issue.
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the bug...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Run command '...'
+        2. Enter input '....'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: A clear and concise description of what you expected to happen.
+      placeholder: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: What actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: command-output
+    attributes:
+      label: Command Output
+      description: Please paste the full command output, including any error messages
+      placeholder: |
+        $ gpm install com.unity.ugui
+        Error: ...
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: gpm-version
+    attributes:
+      label: GPM CLI Version
+      description: What version of GPM CLI are you using?
+      placeholder: v1.0.0 (run `gpm version` to check)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating System
+      description: What operating system are you using?
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Other (please specify in additional context)
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS Version
+      description: What version of your operating system?
+      placeholder: e.g., macOS 13.0, Ubuntu 22.04, Windows 11
+    validations:
+      required: false
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go Version (if building from source)
+      description: What version of Go are you using?
+      placeholder: go1.21.0
+    validations:
+      required: false
+
+  - type: textarea
+    id: config-file
+    attributes:
+      label: Configuration
+      description: |
+        Please share your GPM configuration (remove sensitive data like tokens)
+        Run `gpm config list` or share relevant parts of ~/.gpmrc
+      placeholder: |
+        registry: https://gpm.sh
+        username: myuser
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: |
+        Add any other context about the problem here.
+        - Are you behind a corporate firewall/proxy?
+        - Any recent system changes?
+        - Screenshots if applicable
+      placeholder: Any additional information...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues to ensure this is not a duplicate
+          required: true
+        - label: I have removed any sensitive information from the report
+          required: true
+        - label: I can reproduce this issue consistently
+          required: false
