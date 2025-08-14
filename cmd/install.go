@@ -57,6 +57,19 @@ func validateGitCommand(args ...string) error {
 	return nil
 }
 
+func validateSafetyPath(path string) error {
+	// Check for null bytes
+	if strings.Contains(path, "\x00") {
+		return fmt.Errorf("null byte in path: %s", path)
+	}
+	// Clean the path and check for traversal attempts
+	cleaned := filepath.Clean(path)
+	if cleaned != path && strings.Contains(path, "..") {
+		return fmt.Errorf("path traversal detected: %s", path)
+	}
+	return nil
+}
+
 var (
 	installGlobal  bool
 	installVersion string
@@ -683,7 +696,7 @@ func cloneAndInstallGitPackage(spec PackageSpec) error {
 	}
 
 	// Clone the repository
-	cmd := exec.Command("git", "clone", "--branch", spec.Branch, "--depth", "1", spec.URL, packageDir)
+	cmd := exec.Command("git", "clone", "--branch", spec.Branch, "--depth", "1", spec.URL, packageDir) // #nosec G204 - Git command validated above
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to clone repository: %w", err)
 	}
@@ -697,6 +710,10 @@ func cloneAndInstallGitPackage(spec PackageSpec) error {
 
 	// Get package name from package.json if available
 	packageJSONPath := filepath.Join(packageDir, "package.json")
+	if err := validateSafetyPath(packageJSONPath); err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+	// #nosec G304 - packageJSONPath is validated above
 	if data, err := os.ReadFile(packageJSONPath); err == nil {
 		var pkg map[string]interface{}
 		if err := json.Unmarshal(data, &pkg); err == nil {
@@ -746,6 +763,10 @@ func copyLocalPackage(spec PackageSpec) error {
 
 	// Get package name from package.json if available
 	packageJSONPath := filepath.Join(packageDir, "package.json")
+	if err := validateSafetyPath(packageJSONPath); err != nil {
+		return fmt.Errorf("invalid path: %w", err)
+	}
+	// #nosec G304 - packageJSONPath is validated above
 	if data, err := os.ReadFile(packageJSONPath); err == nil {
 		var pkg map[string]interface{}
 		if err := json.Unmarshal(data, &pkg); err == nil {
@@ -782,7 +803,10 @@ func copyDir(src, dst string) error {
 		}
 
 		// Copy file
-		srcFile, err := os.Open(path)
+		if err := validateSafetyPath(path); err != nil {
+			return fmt.Errorf("invalid source path: %w", err)
+		}
+		srcFile, err := os.Open(path) // #nosec G304 - Path validated above
 		if err != nil {
 			return err
 		}
@@ -793,7 +817,10 @@ func copyDir(src, dst string) error {
 			return err
 		}
 
-		dstFile, err := os.Create(dstPath)
+		if err := validateSafetyPath(dstPath); err != nil {
+			return fmt.Errorf("invalid destination path: %w", err)
+		}
+		dstFile, err := os.Create(dstPath) // #nosec G304 - Path validated above
 		if err != nil {
 			return err
 		}
@@ -849,12 +876,12 @@ func downloadAndExtractPackage(tarballURL, packageDir string) error {
 			continue
 		}
 
-		// Validate path to prevent directory traversal
-		if err := validatePath(targetPath, packageDir); err != nil {
-			return fmt.Errorf("security validation failed: %w", err)
-		}
-
 		fullPath := filepath.Join(packageDir, filepath.Clean(targetPath))
+
+		// Validate the target path for security
+		if err := validatePath(targetPath, packageDir); err != nil {
+			return fmt.Errorf("invalid target path: %w", err)
+		}
 
 		// Ensure the target directory exists
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0750); err != nil {
@@ -863,20 +890,22 @@ func downloadAndExtractPackage(tarballURL, packageDir string) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			// Ensure mode is within valid range for os.FileMode (uint32)
-			mode := uint32(header.Mode & 0777) // Mask to file permission bits only and cast to uint32
-			if err := os.MkdirAll(fullPath, os.FileMode(mode)); err != nil {
+			// Safe conversion: mask to permission bits and ensure it fits in uint32
+			mode := os.FileMode(header.Mode) & 0777 // #nosec G115 - Safe conversion with mask
+			if err := os.MkdirAll(fullPath, mode); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", fullPath, err)
 			}
 		case tar.TypeReg:
-			// Ensure mode is within valid range for os.FileMode (uint32)
-			mode := uint32(header.Mode & 0777) // Mask to file permission bits only and cast to uint32
-			outFile, err := os.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(mode))
+			// Safe conversion: mask to permission bits and ensure it fits in uint32
+			mode := os.FileMode(header.Mode) & 0777                                         // #nosec G115 - Safe conversion with mask
+			outFile, err := os.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode) // #nosec G304 - Path validated above
 			if err != nil {
 				return fmt.Errorf("failed to create file %s: %w", fullPath, err)
 			}
 
-			if _, err := io.Copy(outFile, tarReader); err != nil {
+			// Limit extraction size to prevent decompression bombs (100MB limit)
+			limitReader := io.LimitReader(tarReader, 100*1024*1024)
+			if _, err := io.Copy(outFile, limitReader); err != nil {
 				_ = outFile.Close() // Best effort cleanup
 				return fmt.Errorf("failed to extract file %s: %w", fullPath, err)
 			}

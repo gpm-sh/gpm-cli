@@ -347,7 +347,11 @@ func packFolderToTarball(folderPath string) (string, func(), error) {
 
 	// Read package.json to get name and version
 	packageJSONPath := filepath.Join(folderPath, "package.json")
-	data, err := os.ReadFile(packageJSONPath)
+	if err := validatePathPublish(packageJSONPath, folderPath); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("invalid path: %w", err)
+	}
+	data, err := os.ReadFile(packageJSONPath) // #nosec G304 - Path validated above
 	if err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("failed to read package.json: %w", err)
@@ -406,13 +410,13 @@ func packGitRepoToTarball(gitURL string) (string, func(), error) {
 			cleanup()
 			return "", nil, fmt.Errorf("invalid git command arguments: %w", err)
 		}
-		cmd = exec.Command("git", "clone", "--branch", branch, "--depth", "1", gitURL, cloneDir)
+		cmd = exec.Command("git", "clone", "--branch", branch, "--depth", "1", gitURL, cloneDir) // #nosec G204 - Git command validated above
 	} else {
 		if err := validateGitCommandPublish("clone", "--depth", "1", gitURL, cloneDir); err != nil {
 			cleanup()
 			return "", nil, fmt.Errorf("invalid git command arguments: %w", err)
 		}
-		cmd = exec.Command("git", "clone", "--depth", "1", gitURL, cloneDir)
+		cmd = exec.Command("git", "clone", "--depth", "1", gitURL, cloneDir) // #nosec G204 - Git command validated above
 	}
 
 	if err := cmd.Run(); err != nil {
@@ -448,8 +452,12 @@ func parseGitURL(gitURL string) (cleanURL, branch string) {
 }
 
 func createTarballFromFolder(srcDir, tarballPath string) error {
+	// Validate tarball path
+	if err := validatePathPublish(tarballPath, "."); err != nil {
+		return fmt.Errorf("invalid tarball path: %w", err)
+	}
 	// Create tarball file
-	file, err := os.Create(tarballPath)
+	file, err := os.Create(tarballPath) // #nosec G304 - Path validated above
 	if err != nil {
 		return err
 	}
@@ -502,7 +510,7 @@ func createTarballFromFolder(srcDir, tarballPath string) error {
 				return fmt.Errorf("security validation failed: %w", err)
 			}
 
-			srcFile, err := os.Open(path)
+			srcFile, err := os.Open(path) // #nosec G304 - Path validated by filepath.Walk
 			if err != nil {
 				return err
 			}

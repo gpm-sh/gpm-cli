@@ -171,6 +171,15 @@ func loginWeb() error {
 }
 
 func openBrowser(url string) error {
+	// Validate URL to prevent command injection
+	if url == "" || len(url) > 2048 {
+		return fmt.Errorf("invalid URL")
+	}
+	// Basic validation to ensure it's a proper HTTP(S) URL
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		return fmt.Errorf("invalid URL scheme")
+	}
+
 	var cmd string
 	var args []string
 
@@ -184,7 +193,7 @@ func openBrowser(url string) error {
 		cmd = "xdg-open"
 	}
 	args = append(args, url)
-	return exec.Command(cmd, args...).Start()
+	return exec.Command(cmd, args...).Start() // #nosec G204 - URL validated above
 }
 
 func pollForToken(client *api.Client, sessionID string) (string, string, error) {

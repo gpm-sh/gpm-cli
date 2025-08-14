@@ -7,13 +7,14 @@ DATE ?= $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS = -ldflags "-X gpm.sh/gpm/gpm-cli/cmd.Version=$(VERSION) -X gpm.sh/gpm/gpm-cli/cmd.Commit=$(COMMIT) -X gpm.sh/gpm/gpm-cli/cmd.Date=$(DATE)"
 BUILD_FLAGS = $(LDFLAGS) -trimpath
 
-.PHONY: help test test-unit test-integration test-e2e test-coverage build build-all install clean lint fmt deps version setup-hooks release-major release-minor release-patch
+.PHONY: help test test-unit test-integration test-e2e test-coverage build build-all install clean lint fmt deps version setup-hooks release-major release-minor release-patch gosec
 
 help:
 	@echo "Available targets:"
 	@echo "  deps              Install dependencies"
 	@echo "  fmt               Format code"
-	@echo "  lint              Run linter"
+	@echo "  lint              Run linter and security scan"
+	@echo "  gosec             Run security scan only"
 	@echo "  test              Run all tests"
 	@echo "  test-unit         Run unit tests only"
 	@echo "  test-integration  Run integration tests only"
@@ -32,12 +33,19 @@ help:
 deps:
 	go mod download
 	go mod tidy
+	@which gosec > /dev/null || go install github.com/securego/gosec/v2/cmd/gosec@latest
 
 fmt:
 	go fmt ./...
 
 lint:
 	golangci-lint run
+	@$(MAKE) gosec
+
+gosec:
+	@which gosec > /dev/null || go install github.com/securego/gosec/v2/cmd/gosec@latest
+	@echo "Running security scan..."
+	@gosec ./... || (echo "❌ Security scan failed. Please fix the issues above." && exit 1)
 
 build:
 	@echo "Building gpm CLI..."
