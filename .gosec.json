@@ -1,0 +1,23 @@
+{
+  "severity": "medium",
+  "confidence": "medium",
+  "exclude": {
+    "G204": [
+      "cmd/login.go",
+      "cmd/install.go",
+      "cmd/publish.go"
+    ],
+    "G304": [
+      "cmd/install.go",
+      "cmd/publish.go"
+    ],
+    "G110": [
+      "cmd/install.go"
+    ]
+  },
+  "exclude-dirs": [
+    "test",
+    "testutils",
+    "vendor"
+  ]
+}

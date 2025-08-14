@@ -864,13 +864,13 @@ func downloadAndExtractPackage(tarballURL, packageDir string) error {
 		switch header.Typeflag {
 		case tar.TypeDir:
 			// Ensure mode is within valid range for os.FileMode (uint32)
-			mode := header.Mode & 0777 // Mask to file permission bits only
+			mode := uint32(header.Mode & 0777) // Mask to file permission bits only and cast to uint32
 			if err := os.MkdirAll(fullPath, os.FileMode(mode)); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", fullPath, err)
 			}
 		case tar.TypeReg:
 			// Ensure mode is within valid range for os.FileMode (uint32)
-			mode := header.Mode & 0777 // Mask to file permission bits only
+			mode := uint32(header.Mode & 0777) // Mask to file permission bits only and cast to uint32
 			outFile, err := os.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(mode))
 			if err != nil {
 				return fmt.Errorf("failed to create file %s: %w", fullPath, err)
