@@ -296,7 +296,7 @@ Documentation and examples coming soon.
 
 	pkg := &PackageJSON{}
 	if data, err := os.ReadFile("package.json"); err == nil {
-		json.Unmarshal(data, pkg)
+		_ = json.Unmarshal(data, pkg) // Ignore error - fallback to defaults if invalid
 	}
 
 	readmeText := fmt.Sprintf(readmeContent, pkg.DisplayName, pkg.License)
