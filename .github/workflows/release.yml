@@ -27,12 +27,18 @@ jobs:
       with:
         go-version: ${{ env.GO_VERSION }}
         
+    - name: Clean Go module cache
+      run: go clean -modcache || true
+        
     - name: Cache Go modules
       uses: actions/cache@v4
       with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
         restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
           ${{ runner.os }}-go-
           
     - name: Install dependencies
@@ -61,6 +67,9 @@ jobs:
       with:
         go-version: ${{ env.GO_VERSION }}
         
+    - name: Clean Go module cache
+      run: go clean -modcache || true
+        
     - name: Get version from tag
       id: version
       run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
@@ -68,9 +77,12 @@ jobs:
     - name: Cache Go modules
       uses: actions/cache@v4
       with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
         restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
           ${{ runner.os }}-go-
           
     - name: Install dependencies
