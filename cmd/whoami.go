@@ -37,10 +37,6 @@ func whoami() error {
 	fmt.Println(styling.Separator())
 	fmt.Printf("%s %s\n", styling.Label("Username:"), styling.Value(resp.Username))
 
-	if resp.Studio != "" {
-		fmt.Printf("%s %s\n", styling.Label("Studio:"), styling.Value(resp.Studio))
-	}
-
 	fmt.Println(styling.Separator())
 	return nil
 }

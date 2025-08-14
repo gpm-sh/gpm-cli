@@ -4,8 +4,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -15,16 +18,27 @@ import (
 	"gpm.sh/gpm/gpm-cli/internal/validation"
 )
 
+var (
+	webLogin bool
+)
+
 var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Login to GPM registry",
 	Long:  `Login to the GPM registry with your credentials`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return login()
+		if webLogin {
+			return loginWeb()
+		}
+		return loginCLI()
 	},
 }
 
-func login() error {
+func init() {
+	loginCmd.Flags().BoolVarP(&webLogin, "web", "w", false, "Login via web browser")
+}
+
+func loginCLI() error {
 	cfg := config.GetConfig()
 	client := api.NewClient(cfg.Registry, "")
 
@@ -96,14 +110,102 @@ func login() error {
 	fmt.Printf("%s %s\n", styling.Label("Registry:"), styling.Value(cfg.Registry))
 	if whoamiResp != nil {
 		fmt.Printf("%s %s\n", styling.Label("Username:"), styling.Value(whoamiResp.Username))
-		if whoamiResp.Studio != "" {
-			fmt.Printf("%s %s\n", styling.Label("Studio:"), styling.Value(whoamiResp.Studio))
-		}
 	}
 	fmt.Printf("%s %s\n", styling.Label("Next step:"), styling.Command("gpm publish <package>"))
 	fmt.Println(styling.Separator())
 
 	return nil
+}
+
+func loginWeb() error {
+	cfg := config.GetConfig()
+	client := api.NewClient(cfg.Registry, "")
+
+	fmt.Println(styling.Header("🌐  Web Login"))
+	fmt.Println(styling.Separator())
+	fmt.Println(styling.Info("Opening browser for authentication..."))
+
+	// Request login session from server
+	loginSession, err := client.StartWebLogin()
+	if err != nil {
+		return fmt.Errorf("failed to start web login: %w\n\n%s", err, styling.Hint("Make sure the registry supports web authentication"))
+	}
+
+	// Open browser
+	loginURL := fmt.Sprintf("%s/login/cli/%s", cfg.Registry, loginSession.SessionID)
+	fmt.Printf("\n%s %s\n", styling.Label("Login at:"), styling.Value(loginURL))
+
+	if err := openBrowser(loginURL); err != nil {
+		fmt.Printf("\n%s\n", styling.Warning("⚠️  Could not open browser automatically"))
+		fmt.Printf("%s %s\n\n", styling.Hint("Please open this URL manually:"), styling.Command(loginURL))
+	} else {
+		fmt.Println(styling.Success("✓ Browser opened"))
+	}
+
+	fmt.Println(styling.Info("Waiting for authentication..."))
+	fmt.Println(styling.Hint("Complete the login in your browser, then return here"))
+
+	// Poll for completion
+	token, username, err := pollForToken(client, loginSession.SessionID)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w\n\n%s", err, styling.Hint("Try again or use 'gpm login' for CLI authentication"))
+	}
+
+	// Save authentication
+	config.ResetAuthData()
+	config.SetToken(token)
+	config.SetUsername(username)
+
+	if err := config.SaveConfig(); err != nil {
+		return fmt.Errorf("failed to save configuration: %w\n\n%s", err, styling.Hint("Check file permissions in your home directory"))
+	}
+
+	fmt.Println(styling.Separator())
+	fmt.Println(styling.Success("✓ Login successful!"))
+	fmt.Printf("%s %s\n", styling.Label("Registry:"), styling.Value(cfg.Registry))
+	fmt.Printf("%s %s\n", styling.Label("Username:"), styling.Value(username))
+	fmt.Printf("%s %s\n", styling.Label("Next step:"), styling.Command("gpm publish <package>"))
+	fmt.Println(styling.Separator())
+
+	return nil
+}
+
+func openBrowser(url string) error {
+	var cmd string
+	var args []string
+
+	switch runtime.GOOS {
+	case "windows":
+		cmd = "cmd"
+		args = []string{"/c", "start"}
+	case "darwin":
+		cmd = "open"
+	default: // "linux", "freebsd", "openbsd", "netbsd"
+		cmd = "xdg-open"
+	}
+	args = append(args, url)
+	return exec.Command(cmd, args...).Start()
+}
+
+func pollForToken(client *api.Client, sessionID string) (string, string, error) {
+	timeout := time.After(5 * time.Minute)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			return "", "", fmt.Errorf("authentication timeout - please try again")
+		case <-ticker.C:
+			result, err := client.CheckWebLogin(sessionID)
+			if err != nil {
+				continue // Keep polling on errors
+			}
+			if result.Completed {
+				return result.Token, result.Username, nil
+			}
+		}
+	}
 }
 
 func validateUsername(username string) error {

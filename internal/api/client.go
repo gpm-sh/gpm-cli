@@ -100,7 +100,21 @@ type ErrorResponse struct {
 
 type WhoamiResponse struct {
 	Username string `json:"username"`
-	Studio   string `json:"studio"`
+}
+
+type WebLoginRequest struct {
+	SessionID string `json:"sessionId"`
+}
+
+type WebLoginResponse struct {
+	SessionID string `json:"sessionId"`
+	LoginURL  string `json:"loginUrl"`
+}
+
+type WebLoginStatus struct {
+	Completed bool   `json:"completed"`
+	Token     string `json:"token,omitempty"`
+	Username  string `json:"username,omitempty"`
 }
 
 func NewClient(baseURL, token string) *Client {
@@ -149,7 +163,7 @@ func (c *Client) Login(req *LoginRequest) (*LoginResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var loginResp LoginResponse
 	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
@@ -171,7 +185,7 @@ func (c *Client) Register(req *RegisterRequest) (*RegisterResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var registerResp RegisterResponse
 	if err := json.NewDecoder(resp.Body).Decode(&registerResp); err != nil {
@@ -186,7 +200,7 @@ func (c *Client) Whoami() (*WhoamiResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var whoamiResp WhoamiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&whoamiResp); err != nil {
@@ -194,6 +208,37 @@ func (c *Client) Whoami() (*WhoamiResponse, error) {
 	}
 
 	return &whoamiResp, nil
+}
+
+func (c *Client) StartWebLogin() (*WebLoginResponse, error) {
+	resp, err := c.makeRequest("POST", "/-/v1/login/web", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var webLoginResp WebLoginResponse
+	if err := json.NewDecoder(resp.Body).Decode(&webLoginResp); err != nil {
+		return nil, fmt.Errorf("failed to decode web login response: %w", err)
+	}
+
+	return &webLoginResp, nil
+}
+
+func (c *Client) CheckWebLogin(sessionID string) (*WebLoginStatus, error) {
+	endpoint := fmt.Sprintf("/-/v1/login/web/%s", sessionID)
+	resp, err := c.makeRequest("GET", endpoint, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var status WebLoginStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, fmt.Errorf("failed to decode web login status: %w", err)
+	}
+
+	return &status, nil
 }
 
 func (c *Client) Publish(req *PublishRequest, tarballPath string) (*PublishResponse, error) {
@@ -213,7 +258,7 @@ func (c *Client) Publish(req *PublishRequest, tarballPath string) (*PublishRespo
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tarball: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Read tarball data
 	tarballData, err := io.ReadAll(file)
@@ -258,7 +303,7 @@ func (c *Client) Publish(req *PublishRequest, tarballPath string) (*PublishRespo
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var publishResp PublishResponse
 	if err := json.NewDecoder(resp.Body).Decode(&publishResp); err != nil {
@@ -279,13 +324,13 @@ func extractPackageInfo(tarballPath string) (*PackageInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	gzr, err := gzip.NewReader(file)
 	if err != nil {
 		return nil, err
 	}
-	defer gzr.Close()
+	defer func() { _ = gzr.Close() }()
 
 	tr := tar.NewReader(gzr)
 

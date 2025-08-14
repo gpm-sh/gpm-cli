@@ -159,7 +159,7 @@ func TestClient_makeRequest(t *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, resp)
 				assert.Equal(t, tt.serverStatus, resp.StatusCode)
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		})
 	}

@@ -59,7 +59,7 @@ func info(cmd *cobra.Command, args []string) error {
 			styling.Error("Failed to fetch package information: "+err.Error()),
 			styling.Hint("Check your internet connection and verify the package name"))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 404 {
 		return fmt.Errorf("%s\n\n%s",

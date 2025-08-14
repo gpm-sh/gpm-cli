@@ -220,7 +220,7 @@ func extractPackageInfo(tarballPath string) (*PackageInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	gzr, err := gzip.NewReader(file)
 	if err != nil {
@@ -453,7 +453,7 @@ func createTarballFromFolder(srcDir, tarballPath string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Create gzip writer
 	gzWriter := gzip.NewWriter(file)

@@ -21,6 +21,20 @@ type PackageInfo struct {
 	Version string `json:"version"`
 }
 
+func isValidNameChar(char rune) bool {
+	return (char >= 'a' && char <= 'z') ||
+		(char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') ||
+		char == '.' || char == '-' || char == '_'
+}
+
+func isValidVersionChar(char rune) bool {
+	return (char >= 'a' && char <= 'z') ||
+		(char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') ||
+		char == '.' || char == '-'
+}
+
 var packCmd = &cobra.Command{
 	Use:   "pack",
 	Short: "Create a package tarball",
@@ -168,10 +182,7 @@ func isValidPackageNameForFilename(name string) bool {
 
 	// Only allow alphanumeric, dots, hyphens, and underscores
 	for _, char := range name {
-		if !((char >= 'a' && char <= 'z') ||
-			(char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') ||
-			char == '.' || char == '-' || char == '_') {
+		if !isValidNameChar(char) {
 			return false
 		}
 	}
@@ -187,10 +198,7 @@ func isValidVersionForFilename(version string) bool {
 
 	// Only allow alphanumeric, dots, and hyphens (semantic versioning)
 	for _, char := range version {
-		if !((char >= 'a' && char <= 'z') ||
-			(char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') ||
-			char == '.' || char == '-') {
+		if !isValidVersionChar(char) {
 			return false
 		}
 	}

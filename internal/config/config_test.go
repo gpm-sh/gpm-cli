@@ -52,8 +52,8 @@ username: "testuser"`
 			// Setup
 			tmpDir := tt.setup(t)
 			oldHome := os.Getenv("HOME")
-			os.Setenv("HOME", tmpDir)
-			defer os.Setenv("HOME", oldHome)
+			_ = os.Setenv("HOME", tmpDir)
+			defer func() { _ = os.Setenv("HOME", oldHome) }()
 
 			// Reset global state
 			config = nil

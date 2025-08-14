@@ -68,7 +68,7 @@ func search(cmd *cobra.Command, args []string) error {
 			styling.Error("Failed to search packages: "+err.Error()),
 			styling.Hint("Check your internet connection and registry URL"))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("%s\n\n%s",

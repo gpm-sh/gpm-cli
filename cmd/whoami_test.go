@@ -34,7 +34,6 @@ func TestWhoamiFunction(t *testing.T) {
 			token: "valid-token",
 			serverResponse: api.WhoamiResponse{
 				Username: "testuser",
-				Studio:   "test-studio",
 			},
 			serverStatus: http.StatusOK,
 			expectError:  false,
@@ -45,7 +44,6 @@ func TestWhoamiFunction(t *testing.T) {
 			token: "valid-token",
 			serverResponse: api.WhoamiResponse{
 				Username: "globaluser",
-				Studio:   "",
 			},
 			serverStatus: http.StatusOK,
 			expectError:  false,
@@ -116,9 +114,6 @@ func TestWhoamiFunction(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.expectedUser, result.Username)
-
-				// Test studio information if present
-				assert.Equal(t, tt.serverResponse.Studio, result.Studio)
 			}
 		})
 	}

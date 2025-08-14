@@ -259,10 +259,6 @@ VERSION=1.2.3 make build
 
 ## 🔐 Security
 
-### Token Storage
-
-Authentication tokens are automatically encrypted using AES-256-GCM before storage in `~/.gpmrc`. The encryption key is derived from your system's username and hostname.
-
 ### Secure Credential Handling
 
 - Passwords are cleared from memory immediately after use
@@ -279,7 +275,7 @@ GPM stores configuration in `~/.gpmrc`:
 ```yaml
 registry: https://gpm.sh
 username: your-username
-token: <encrypted-token>
+token: your-auth-token
 ```
 
 ### Environment Variables

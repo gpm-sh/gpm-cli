@@ -50,7 +50,7 @@ func (s *PackPublishSuite) SetupSuite() {
 }
 
 func (s *PackPublishSuite) TearDownSuite() {
-	os.RemoveAll(s.tmpDir)
+	_ = os.RemoveAll(s.tmpDir)
 }
 
 func (s *PackPublishSuite) SetupTest() {
@@ -158,7 +158,7 @@ func (s *PackPublishSuite) isServerAvailable() bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode == 200
 }
 

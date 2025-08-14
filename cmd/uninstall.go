@@ -17,6 +17,13 @@ var (
 	uninstallGlobal  bool
 )
 
+func isValidPackageNameChar(char rune) bool {
+	return (char >= 'a' && char <= 'z') ||
+		(char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') ||
+		char == '.' || char == '-' || char == '_'
+}
+
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall <package>",
 	Short: "Uninstall a package",
@@ -166,10 +173,7 @@ func isValidPackageName(name string) bool {
 	// Basic validation for reverse-DNS format or npm-compatible names
 	// Allow letters, numbers, dots, hyphens, and underscores
 	for _, char := range name {
-		if !((char >= 'a' && char <= 'z') ||
-			(char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') ||
-			char == '.' || char == '-' || char == '_') {
+		if !isValidPackageNameChar(char) {
 			return false
 		}
 	}

@@ -1,14 +1,7 @@
 package config
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"regexp"
@@ -79,12 +72,6 @@ func InitConfig() {
 		// Continue with defaults if unmarshaling fails
 	}
 
-	// Decrypt token if it exists and appears to be encrypted (base64 encoded)
-	if config.Token != "" && isEncryptedToken(config.Token) {
-		if decryptedToken, err := decryptToken(config.Token); err == nil {
-			config.Token = decryptedToken
-		}
-	}
 }
 
 func GetConfig() *Config {
@@ -112,13 +99,8 @@ func SaveConfig() error {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	encryptedToken, err := encryptToken(cfg.Token)
-	if err != nil {
-		return fmt.Errorf("failed to encrypt token: %w", err)
-	}
-
 	viper.Set("registry", cfg.Registry)
-	viper.Set("token", encryptedToken)
+	viper.Set("token", cfg.Token)
 	viper.Set("username", cfg.Username)
 
 	configFile := viper.ConfigFileUsed()
@@ -202,99 +184,4 @@ func validateConfig(cfg *Config) error {
 	}
 
 	return nil
-}
-
-func encryptToken(token string) (string, error) {
-	if token == "" {
-		return "", nil
-	}
-
-	key := getEncryptionKey()
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", err
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", err
-	}
-
-	ciphertext := gcm.Seal(nonce, nonce, []byte(token), nil)
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
-}
-
-func decryptToken(encryptedToken string) (string, error) {
-	if encryptedToken == "" {
-		return "", nil
-	}
-
-	data, err := base64.StdEncoding.DecodeString(encryptedToken)
-	if err != nil {
-		return "", err
-	}
-
-	key := getEncryptionKey()
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", err
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-
-	if len(data) < gcm.NonceSize() {
-		return "", errors.New("invalid encrypted token")
-	}
-
-	nonce, ciphertext := data[:gcm.NonceSize()], data[gcm.NonceSize():]
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return "", err
-	}
-
-	return string(plaintext), nil
-}
-
-func getEncryptionKey() []byte {
-	username := os.Getenv("USER")
-	if username == "" {
-		username = os.Getenv("USERNAME")
-	}
-	if username == "" {
-		username = "gpm-user"
-	}
-
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "gpm-host"
-	}
-
-	keyMaterial := fmt.Sprintf("gpm-cli-%s-%s", username, hostname)
-	hash := sha256.Sum256([]byte(keyMaterial))
-	return hash[:]
-}
-
-// isEncryptedToken checks if a token appears to be encrypted (base64 encoded with appropriate length)
-func isEncryptedToken(token string) bool {
-	// Check if it's a valid base64 string and has reasonable length for encrypted data
-	if len(token) < 32 { // Minimum length for encrypted token with nonce
-		return false
-	}
-
-	// Try to decode as base64
-	data, err := base64.StdEncoding.DecodeString(token)
-	if err != nil {
-		return false
-	}
-
-	// Check if decoded data has minimum expected length (nonce + some encrypted data)
-	return len(data) >= 16 // GCM nonce is 12 bytes + at least some encrypted data
 }

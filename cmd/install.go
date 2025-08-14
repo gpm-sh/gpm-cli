@@ -380,7 +380,7 @@ func downloadAndInstallPackage(packageName, version string, isDev bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch package metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 404 {
 		return fmt.Errorf("package not found: %s", packageName)
@@ -811,7 +811,7 @@ func downloadAndExtractPackage(tarballURL, packageDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to download tarball: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("failed to download tarball (HTTP %d)", resp.StatusCode)
