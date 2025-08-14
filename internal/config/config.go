@@ -156,6 +156,12 @@ func SetUsername(username string) {
 	cfg.Username = username
 }
 
+func ResetAuthData() {
+	cfg := GetConfig()
+	cfg.Token = ""
+	cfg.Username = ""
+}
+
 func GetRegistry() string {
 	cfg := GetConfig()
 	return cfg.Registry

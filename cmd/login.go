@@ -75,8 +75,17 @@ func login() error {
 		return handleLoginError(err)
 	}
 
+	// Reset all auth data before setting new token
+	config.ResetAuthData()
 	config.SetToken(resp.Token)
-	// Don't set username here - we'll get it from whoami if needed
+
+	// Fetch fresh user info with the new token
+	userClient := api.NewClient(cfg.Registry, resp.Token)
+	whoamiResp, err := userClient.Whoami()
+	if err == nil {
+		// Only set username if we successfully got fresh info
+		config.SetUsername(whoamiResp.Username)
+	}
 
 	if err := config.SaveConfig(); err != nil {
 		return fmt.Errorf("failed to save configuration: %w\n\n%s", err, styling.Hint("Check file permissions in your home directory and try 'gpm config' to verify settings"))
@@ -85,6 +94,12 @@ func login() error {
 	fmt.Println(styling.Separator())
 	fmt.Println(styling.Success("✓ Login successful!"))
 	fmt.Printf("%s %s\n", styling.Label("Registry:"), styling.Value(cfg.Registry))
+	if whoamiResp != nil {
+		fmt.Printf("%s %s\n", styling.Label("Username:"), styling.Value(whoamiResp.Username))
+		if whoamiResp.Studio != "" {
+			fmt.Printf("%s %s\n", styling.Label("Studio:"), styling.Value(whoamiResp.Studio))
+		}
+	}
 	fmt.Printf("%s %s\n", styling.Label("Next step:"), styling.Command("gpm publish <package>"))
 	fmt.Println(styling.Separator())
 
