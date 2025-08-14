@@ -20,6 +20,43 @@ import (
 	"gpm.sh/gpm/gpm-cli/internal/styling"
 )
 
+// validatePath ensures the path is safe and doesn't escape the destination directory
+func validatePath(filePath, destDir string) error {
+	// Clean the path to resolve any . or .. elements
+	cleanPath := filepath.Clean(filePath)
+
+	// Convert to absolute path
+	absPath, err := filepath.Abs(filepath.Join(destDir, cleanPath))
+	if err != nil {
+		return fmt.Errorf("failed to resolve absolute path: %w", err)
+	}
+
+	// Ensure the absolute path is within the destination directory
+	destAbs, err := filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination directory: %w", err)
+	}
+
+	if !strings.HasPrefix(absPath, destAbs) {
+		return fmt.Errorf("path traversal attempt detected: %s", filePath)
+	}
+
+	return nil
+}
+
+// validateGitCommand sanitizes git command arguments
+func validateGitCommand(args ...string) error {
+	for _, arg := range args {
+		// Reject arguments that could be dangerous
+		if strings.Contains(arg, ";") || strings.Contains(arg, "&") ||
+			strings.Contains(arg, "|") || strings.Contains(arg, "`") ||
+			strings.Contains(arg, "$") {
+			return fmt.Errorf("potentially dangerous command argument: %s", arg)
+		}
+	}
+	return nil
+}
+
 var (
 	installGlobal  bool
 	installVersion string
@@ -640,6 +677,11 @@ func cloneAndInstallGitPackage(spec PackageSpec) error {
 		return fmt.Errorf("failed to remove existing package: %w", err)
 	}
 
+	// Validate git command arguments for security
+	if err := validateGitCommand("clone", "--branch", spec.Branch, "--depth", "1", spec.URL, packageDir); err != nil {
+		return fmt.Errorf("invalid git command arguments: %w", err)
+	}
+
 	// Clone the repository
 	cmd := exec.Command("git", "clone", "--branch", spec.Branch, "--depth", "1", spec.URL, packageDir)
 	if err := cmd.Run(); err != nil {
@@ -744,7 +786,7 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		defer srcFile.Close()
+		defer func() { _ = srcFile.Close() }()
 
 		// Create destination directory if needed
 		if err := os.MkdirAll(filepath.Dir(dstPath), 0750); err != nil {
@@ -755,7 +797,7 @@ func copyDir(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		defer dstFile.Close()
+		defer func() { _ = dstFile.Close() }()
 
 		_, err = io.Copy(dstFile, srcFile)
 		return err
@@ -780,7 +822,7 @@ func downloadAndExtractPackage(tarballURL, packageDir string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gzReader.Close()
+	defer func() { _ = gzReader.Close() }()
 
 	// Create tar reader
 	tarReader := tar.NewReader(gzReader)
@@ -807,7 +849,12 @@ func downloadAndExtractPackage(tarballURL, packageDir string) error {
 			continue
 		}
 
-		fullPath := filepath.Join(packageDir, targetPath)
+		// Validate path to prevent directory traversal
+		if err := validatePath(targetPath, packageDir); err != nil {
+			return fmt.Errorf("security validation failed: %w", err)
+		}
+
+		fullPath := filepath.Join(packageDir, filepath.Clean(targetPath))
 
 		// Ensure the target directory exists
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0750); err != nil {
@@ -816,20 +863,26 @@ func downloadAndExtractPackage(tarballURL, packageDir string) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(fullPath, os.FileMode(header.Mode)); err != nil {
+			// Ensure mode is within valid range for os.FileMode (uint32)
+			mode := header.Mode & 0777 // Mask to file permission bits only
+			if err := os.MkdirAll(fullPath, os.FileMode(mode)); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", fullPath, err)
 			}
 		case tar.TypeReg:
-			outFile, err := os.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+			// Ensure mode is within valid range for os.FileMode (uint32)
+			mode := header.Mode & 0777 // Mask to file permission bits only
+			outFile, err := os.OpenFile(fullPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(mode))
 			if err != nil {
 				return fmt.Errorf("failed to create file %s: %w", fullPath, err)
 			}
 
 			if _, err := io.Copy(outFile, tarReader); err != nil {
-				outFile.Close()
+				_ = outFile.Close() // Best effort cleanup
 				return fmt.Errorf("failed to extract file %s: %w", fullPath, err)
 			}
-			outFile.Close()
+			if err := outFile.Close(); err != nil {
+				return fmt.Errorf("failed to close file %s: %w", fullPath, err)
+			}
 		}
 	}
 
@@ -872,7 +925,7 @@ func updateUnityManifest(packageName, version string, isDev bool) error {
 		return fmt.Errorf("failed to marshal manifest: %w", err)
 	}
 
-	return os.WriteFile(manifestPath, updatedData, 0644)
+	return os.WriteFile(manifestPath, updatedData, 0600)
 }
 
 func updatePackageJSON(packageName, version string, isDev bool) error {

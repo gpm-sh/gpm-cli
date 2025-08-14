@@ -18,6 +18,43 @@ import (
 	"gpm.sh/gpm/gpm-cli/internal/styling"
 )
 
+// validatePath ensures the path is safe and doesn't escape the destination directory
+func validatePathPublish(filePath, destDir string) error {
+	// Clean the path to resolve any . or .. elements
+	cleanPath := filepath.Clean(filePath)
+
+	// Convert to absolute path
+	absPath, err := filepath.Abs(filepath.Join(destDir, cleanPath))
+	if err != nil {
+		return fmt.Errorf("failed to resolve absolute path: %w", err)
+	}
+
+	// Ensure the absolute path is within the destination directory
+	destAbs, err := filepath.Abs(destDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination directory: %w", err)
+	}
+
+	if !strings.HasPrefix(absPath, destAbs) {
+		return fmt.Errorf("path traversal attempt detected: %s", filePath)
+	}
+
+	return nil
+}
+
+// validateCommand sanitizes git command arguments
+func validateGitCommandPublish(args ...string) error {
+	for _, arg := range args {
+		// Reject arguments that could be dangerous
+		if strings.Contains(arg, ";") || strings.Contains(arg, "&") ||
+			strings.Contains(arg, "|") || strings.Contains(arg, "`") ||
+			strings.Contains(arg, "$") {
+			return fmt.Errorf("potentially dangerous command argument: %s", arg)
+		}
+	}
+	return nil
+}
+
 var (
 	publishAccess string
 	publishTag    string
@@ -189,7 +226,7 @@ func extractPackageInfo(tarballPath string) (*PackageInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer gzr.Close()
+	defer func() { _ = gzr.Close() }()
 
 	tr := tar.NewReader(gzr)
 
@@ -305,7 +342,7 @@ func packFolderToTarball(folderPath string) (string, func(), error) {
 	}
 
 	cleanup := func() {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir) // Best effort cleanup
 	}
 
 	// Read package.json to get name and version
@@ -354,7 +391,7 @@ func packGitRepoToTarball(gitURL string) (string, func(), error) {
 	}
 
 	cleanup := func() {
-		os.RemoveAll(tempDir)
+		_ = os.RemoveAll(tempDir) // Best effort cleanup
 	}
 
 	cloneDir := filepath.Join(tempDir, "repo")
@@ -362,11 +399,19 @@ func packGitRepoToTarball(gitURL string) (string, func(), error) {
 	// Parse Git URL to extract branch/tag if specified
 	gitURL, branch := parseGitURL(gitURL)
 
-	// Clone repository
+	// Clone repository with input validation
 	var cmd *exec.Cmd
 	if branch != "" {
+		if err := validateGitCommandPublish("clone", "--branch", branch, "--depth", "1", gitURL, cloneDir); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("invalid git command arguments: %w", err)
+		}
 		cmd = exec.Command("git", "clone", "--branch", branch, "--depth", "1", gitURL, cloneDir)
 	} else {
+		if err := validateGitCommandPublish("clone", "--depth", "1", gitURL, cloneDir); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("invalid git command arguments: %w", err)
+		}
 		cmd = exec.Command("git", "clone", "--depth", "1", gitURL, cloneDir)
 	}
 
@@ -377,7 +422,7 @@ func packGitRepoToTarball(gitURL string) (string, func(), error) {
 
 	// Remove .git directory
 	gitDir := filepath.Join(cloneDir, ".git")
-	os.RemoveAll(gitDir)
+	_ = os.RemoveAll(gitDir) // Best effort cleanup
 
 	// Now pack the cloned folder
 	tarballPath, _, err := packFolderToTarball(cloneDir)
@@ -412,11 +457,11 @@ func createTarballFromFolder(srcDir, tarballPath string) error {
 
 	// Create gzip writer
 	gzWriter := gzip.NewWriter(file)
-	defer gzWriter.Close()
+	defer func() { _ = gzWriter.Close() }()
 
 	// Create tar writer
 	tarWriter := tar.NewWriter(gzWriter)
-	defer tarWriter.Close()
+	defer func() { _ = tarWriter.Close() }()
 
 	// Walk directory and add files to tar
 	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
@@ -452,11 +497,18 @@ func createTarballFromFolder(srcDir, tarballPath string) error {
 
 		// Write file content if it's a regular file
 		if info.Mode().IsRegular() {
+			// Validate path to prevent access to files outside the intended directory
+			if err := validatePathPublish(relPath, srcDir); err != nil {
+				return fmt.Errorf("security validation failed: %w", err)
+			}
+
 			srcFile, err := os.Open(path)
 			if err != nil {
 				return err
 			}
-			defer srcFile.Close()
+			defer func() {
+				_ = srcFile.Close() // Handle error from defer
+			}()
 
 			_, err = io.Copy(tarWriter, srcFile)
 			return err
