@@ -19,7 +19,7 @@ import (
 )
 
 var (
-	webLogin bool
+	authType string
 )
 
 var loginCmd = &cobra.Command{
@@ -27,15 +27,19 @@ var loginCmd = &cobra.Command{
 	Short: "Login to GPM registry",
 	Long:  `Login to the GPM registry with your credentials`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if webLogin {
+		switch authType {
+		case "web", "":
 			return loginWeb()
+		case "legacy":
+			return loginCLI()
+		default:
+			return fmt.Errorf("invalid auth-type: %s (must be 'web' or 'legacy')", authType)
 		}
-		return loginCLI()
 	},
 }
 
 func init() {
-	loginCmd.Flags().BoolVarP(&webLogin, "web", "w", false, "Login via web browser")
+	loginCmd.Flags().StringVar(&authType, "auth-type", "web", "Authentication type: 'web' (browser-based) or 'legacy' (username/password)")
 }
 
 func loginCLI() error {
@@ -117,59 +121,6 @@ func loginCLI() error {
 	return nil
 }
 
-func loginWeb() error {
-	cfg := config.GetConfig()
-	client := api.NewClient(cfg.Registry, "")
-
-	fmt.Println(styling.Header("🌐  Web Login"))
-	fmt.Println(styling.Separator())
-	fmt.Println(styling.Info("Opening browser for authentication..."))
-
-	// Request login session from server
-	loginSession, err := client.StartWebLogin()
-	if err != nil {
-		return fmt.Errorf("failed to start web login: %w\n\n%s", err, styling.Hint("Make sure the registry supports web authentication"))
-	}
-
-	// Open browser
-	loginURL := fmt.Sprintf("%s/login/cli/%s", cfg.Registry, loginSession.SessionID)
-	fmt.Printf("\n%s %s\n", styling.Label("Login at:"), styling.Value(loginURL))
-
-	if err := openBrowser(loginURL); err != nil {
-		fmt.Printf("\n%s\n", styling.Warning("⚠️  Could not open browser automatically"))
-		fmt.Printf("%s %s\n\n", styling.Hint("Please open this URL manually:"), styling.Command(loginURL))
-	} else {
-		fmt.Println(styling.Success("✓ Browser opened"))
-	}
-
-	fmt.Println(styling.Info("Waiting for authentication..."))
-	fmt.Println(styling.Hint("Complete the login in your browser, then return here"))
-
-	// Poll for completion
-	token, username, err := pollForToken(client, loginSession.SessionID)
-	if err != nil {
-		return fmt.Errorf("authentication failed: %w\n\n%s", err, styling.Hint("Try again or use 'gpm login' for CLI authentication"))
-	}
-
-	// Save authentication
-	config.ResetAuthData()
-	config.SetToken(token)
-	config.SetUsername(username)
-
-	if err := config.SaveConfig(); err != nil {
-		return fmt.Errorf("failed to save configuration: %w\n\n%s", err, styling.Hint("Check file permissions in your home directory"))
-	}
-
-	fmt.Println(styling.Separator())
-	fmt.Println(styling.Success("✓ Login successful!"))
-	fmt.Printf("%s %s\n", styling.Label("Registry:"), styling.Value(cfg.Registry))
-	fmt.Printf("%s %s\n", styling.Label("Username:"), styling.Value(username))
-	fmt.Printf("%s %s\n", styling.Label("Next step:"), styling.Command("gpm publish <package>"))
-	fmt.Println(styling.Separator())
-
-	return nil
-}
-
 func openBrowser(url string) error {
 	// Validate URL to prevent command injection
 	if url == "" || len(url) > 2048 {
@@ -197,8 +148,8 @@ func openBrowser(url string) error {
 }
 
 func pollForToken(client *api.Client, sessionID string) (string, string, error) {
-	timeout := time.After(5 * time.Minute)
-	ticker := time.NewTicker(2 * time.Second)
+	timeout := time.After(10 * time.Minute)   // More realistic timeout like NPM
+	ticker := time.NewTicker(5 * time.Second) // Less aggressive polling
 	defer ticker.Stop()
 
 	for {
@@ -208,7 +159,14 @@ func pollForToken(client *api.Client, sessionID string) (string, string, error) 
 		case <-ticker.C:
 			result, err := client.CheckWebLogin(sessionID)
 			if err != nil {
-				continue // Keep polling on errors
+				// Check if session expired or not found
+				if strings.Contains(err.Error(), "session_expired") {
+					return "", "", fmt.Errorf("authentication session expired - please try again")
+				}
+				if strings.Contains(err.Error(), "session_not_found") {
+					return "", "", fmt.Errorf("authentication session not found - please try again")
+				}
+				continue // Keep polling on other errors
 			}
 			if result.Completed {
 				return result.Token, result.Username, nil
@@ -249,4 +207,51 @@ func handleLoginError(err error) error {
 			styling.Error(fmt.Sprintf("Login failed: %v", err)),
 			styling.Hint("Run with 'gpm --verbose login' for detailed error information."))
 	}
+}
+
+// NPM-style web authentication (simple browser login)
+func loginWeb() error {
+	cfg := config.GetConfig()
+	client := api.NewClient(cfg.Registry, "")
+
+	fmt.Println(styling.Header("🌐 GPM Web Login"))
+	fmt.Println(styling.SubHeader("Authenticating via web browser..."))
+
+	// Start web login session
+	fmt.Printf("%s Starting web login session...\n", styling.Info("ℹ"))
+	webLoginResp, err := client.StartWebLogin()
+	if err != nil {
+		return fmt.Errorf("failed to start web login: %w", err)
+	}
+
+	fmt.Printf("%s %s\n", styling.Success("✓"), "Web login session created")
+	fmt.Printf("%s Opening browser to authenticate...\n", styling.Info("ℹ"))
+
+	// Open browser to login URL
+	if err := openBrowser(webLoginResp.LoginURL); err != nil {
+		fmt.Printf("%s\n", styling.Warning("⚠ Could not open browser automatically"))
+		fmt.Printf("%s\n\n", styling.Muted("Please manually open the following URL in your browser:"))
+		fmt.Printf("%s\n\n", styling.URL(webLoginResp.LoginURL))
+	}
+
+	// Poll for completion
+	fmt.Printf("%s Waiting for authentication...\n", styling.Info("⏳"))
+	token, username, err := pollForToken(client, webLoginResp.SessionID)
+	if err != nil {
+		return fmt.Errorf("web authentication failed: %w", err)
+	}
+
+	// Save token and username to config
+	cfg.Token = token
+	cfg.Username = username
+
+	if err := config.SaveConfig(); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+
+	fmt.Printf("\n%s\n", styling.Success("🎉 Web login successful!"))
+	fmt.Printf("%s %s\n", styling.Label("Logged in as:"), styling.MakeBold(username))
+	fmt.Printf("%s %s\n", styling.Label("Registry:"), styling.Muted(cfg.Registry))
+
+	return nil
 }

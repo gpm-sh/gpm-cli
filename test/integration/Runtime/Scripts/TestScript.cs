@@ -1,2 +1,12 @@
 using UnityEngine;
-public class TestScript : MonoBehaviour { }
+
+namespace IntegrationTest
+{
+    public class TestScript : MonoBehaviour
+    {
+        void Start()
+        {
+            Debug.Log("Integration test package loaded");
+        }
+    }
+}

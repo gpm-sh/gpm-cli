@@ -6,9 +6,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"gpm.sh/gpm/gpm-cli/internal/errors"
+)
+
+type AccessLevel string
+
+const (
+	AccessPublic  AccessLevel = "public"
+	AccessScoped  AccessLevel = "scoped"
+	AccessPrivate AccessLevel = "private"
 )
 
 type PackageJSON struct {
@@ -28,6 +38,7 @@ type PackageJSON struct {
 	Category     string            `json:"category,omitempty"`
 }
 
+// Legacy ValidationResult for backward compatibility
 type ValidationResult struct {
 	Valid    bool
 	Package  *PackageJSON
@@ -35,24 +46,42 @@ type ValidationResult struct {
 	Warnings []string
 }
 
-func ValidatePackage(path string) (*ValidationResult, error) {
-	result := &ValidationResult{
-		Valid:    true,
-		Errors:   []error{},
-		Warnings: []string{},
+// Modern ValidationResult with additional features
+type PackageValidationResult struct {
+	Valid             bool
+	Package           *PackageJSON
+	Errors            []error
+	Warnings          []string
+	RecommendedAccess AccessLevel
+	NpmCompatible     bool
+	RequiredFields    []string
+}
+
+var (
+	npmNameRegex         = regexp.MustCompile(`^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$`)
+	scopedNameRegex      = regexp.MustCompile(`^@([a-z0-9-~][a-z0-9-._~]*)\/([a-z0-9-~][a-z0-9-._~]*)$`)
+	semanticVersionRegex = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*|[0-9a-zA-Z-]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*|[0-9a-zA-Z-]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
+)
+
+var reservedNames = []string{
+	"node_modules", "favicon.ico", "..", ".", "npm", "gpm", "package", "packages",
+	"admin", "administrator", "root", "www", "ftp", "mail", "email", "api",
+	"test", "tests", "testing", "spec", "specs", "bin", "binary", "binaries",
+	"lib", "libs", "libraries", "src", "source", "sources", "doc", "docs",
+	"documentation", "example", "examples", "sample", "samples", "demo", "demos",
+}
+
+func ValidatePackage(path string) (*PackageValidationResult, error) {
+	result := &PackageValidationResult{
+		Valid:          true,
+		Errors:         []error{},
+		Warnings:       []string{},
+		NpmCompatible:  true,
+		RequiredFields: []string{"name", "version", "description"},
 	}
 
-	// Security: Clean the path and validate it's safe
-	cleanPath := filepath.Clean(path)
-	packagePath := filepath.Join(cleanPath, "package.json")
-	cleanPackagePath := filepath.Clean(packagePath)
-
-	// Security: Ensure the resulting path is still within the expected directory
-	if !strings.HasPrefix(cleanPackagePath, cleanPath) {
-		return nil, fmt.Errorf("invalid path: potential directory traversal")
-	}
-
-	data, err := os.ReadFile(cleanPackagePath)
+	// Load package.json
+	data, err := os.ReadFile(filepath.Join(path, "package.json"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read package.json: %w", err)
 	}
@@ -64,59 +93,242 @@ func ValidatePackage(path string) (*ValidationResult, error) {
 
 	result.Package = &pkg
 
-	if err := validateRequiredFields(&pkg); err != nil {
+	// Modern validation - more lenient than GPM's strict validation
+	if pkg.Name == "" {
 		result.Valid = false
+		result.Errors = append(result.Errors, fmt.Errorf("package name is required"))
+	}
+
+	if pkg.Version == "" {
+		result.Valid = false
+		result.Errors = append(result.Errors, fmt.Errorf("package version is required"))
+	}
+
+	if pkg.Description == "" {
+		result.Warnings = append(result.Warnings, "package description is recommended")
+	}
+
+	if err := validateNpmCompatibleName(pkg.Name); err != nil {
+		result.Valid = false
+		result.NpmCompatible = false
 		result.Errors = append(result.Errors, err)
 	}
 
-	if err := validatePackageName(pkg.Name); err != nil {
+	if err := validateSemanticVersion(pkg.Version); err != nil {
 		result.Valid = false
+		result.NpmCompatible = false
 		result.Errors = append(result.Errors, err)
 	}
 
-	if err := validateVersion(pkg.Version); err != nil {
-		result.Valid = false
-		result.Errors = append(result.Errors, err)
-	}
+	result.RecommendedAccess = determineRecommendedAccess(pkg.Name)
 
-	if err := validateUnityField(&pkg); err != nil {
-		result.Warnings = append(result.Warnings, err.Error())
-	}
+	validateOptionalFields(result)
+	validateUnitySpecificFields(result)
+	validateNpmCompatibility(result)
 
 	return result, nil
 }
 
-func validateRequiredFields(pkg *PackageJSON) error {
-	if pkg.Name == "" {
+// Validation functions
+func validateNpmCompatibleName(name string) error {
+	if name == "" {
 		return errors.ErrPackageJSONInvalid("name")
 	}
-	if pkg.Version == "" {
-		return errors.ErrPackageJSONInvalid("version")
+
+	if len(name) > 214 {
+		return fmt.Errorf("package name cannot be longer than 214 characters")
 	}
-	if pkg.Description == "" {
-		return errors.ErrPackageJSONInvalid("description")
+
+	if !npmNameRegex.MatchString(name) {
+		return fmt.Errorf("package name %q is not a valid npm package name", name)
 	}
+
+	nameLower := strings.ToLower(name)
+	if name != nameLower {
+		return fmt.Errorf("package name cannot contain uppercase letters")
+	}
+
+	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+		return fmt.Errorf("package name cannot start with . or _")
+	}
+
+	for _, reserved := range reservedNames {
+		if strings.EqualFold(name, reserved) || strings.EqualFold(name, "@"+reserved) {
+			return fmt.Errorf("package name %q is reserved", name)
+		}
+	}
+
+	for _, r := range name {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return fmt.Errorf("package name cannot contain whitespace or control characters")
+		}
+	}
+
 	return nil
 }
 
-func validatePackageName(name string) error {
-	return errors.ValidatePackageName(name)
-}
-
-func validateVersion(version string) error {
+func validateSemanticVersion(version string) error {
 	if version == "" {
 		return errors.ErrVersionInvalid(version)
 	}
-	return nil
-}
 
-func validateUnityField(pkg *PackageJSON) error {
-	if pkg.Unity == "" && pkg.DisplayName == "" {
-		return fmt.Errorf("unity package should include 'unity' or 'displayName' field for better UPM compatibility")
+	if !semanticVersionRegex.MatchString(version) {
+		return fmt.Errorf("version %q is not a valid semantic version", version)
 	}
+
 	return nil
 }
 
+func determineRecommendedAccess(name string) AccessLevel {
+	if scopedNameRegex.MatchString(name) {
+		return AccessScoped
+	}
+	return AccessPublic
+}
+
+func validateOptionalFields(result *PackageValidationResult) {
+	pkg := result.Package
+
+	if pkg.License == "" {
+		result.Warnings = append(result.Warnings, "package.json should include 'license' field")
+	}
+
+	if pkg.Author == "" {
+		result.Warnings = append(result.Warnings, "package.json should include 'author' field")
+	}
+
+	if pkg.Repository == "" {
+		result.Warnings = append(result.Warnings, "package.json should include 'repository' field")
+	}
+
+	if len(pkg.Keywords) == 0 {
+		result.Warnings = append(result.Warnings, "package.json should include 'keywords' for better discoverability")
+	}
+
+	if pkg.Homepage == "" && pkg.Repository != "" {
+		result.Warnings = append(result.Warnings, "consider adding 'homepage' field")
+	}
+}
+
+func validateUnitySpecificFields(result *PackageValidationResult) {
+	pkg := result.Package
+
+	if pkg.Unity != "" {
+		if !strings.HasPrefix(pkg.Unity, "20") {
+			result.Warnings = append(result.Warnings, "unity version should be in format '2020.3' or higher")
+		}
+	}
+
+	if pkg.DisplayName != "" && len(pkg.DisplayName) > 50 {
+		result.Warnings = append(result.Warnings, "displayName should be 50 characters or less for better UPM display")
+	}
+
+	if pkg.Category != "" {
+		validCategories := []string{
+			"Tools", "Editor", "Runtime", "Rendering", "Networking", "Audio",
+			"Animation", "Physics", "Input", "AI", "UI", "Utilities",
+		}
+		isValid := false
+		for _, cat := range validCategories {
+			if strings.EqualFold(pkg.Category, cat) {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("category '%s' is not a standard Unity category", pkg.Category))
+		}
+	}
+}
+
+func validateNpmCompatibility(result *PackageValidationResult) {
+	pkg := result.Package
+
+	if pkg.Main != "" {
+		if !strings.HasSuffix(pkg.Main, ".js") && !strings.HasSuffix(pkg.Main, ".mjs") {
+			result.Warnings = append(result.Warnings, "main field should point to a JavaScript file for npm compatibility")
+		}
+	}
+
+	if len(pkg.Files) > 0 {
+		hasValidEntry := false
+		for _, file := range pkg.Files {
+			if file != "" && !strings.Contains(file, "..") {
+				hasValidEntry = true
+				break
+			}
+		}
+		if !hasValidEntry {
+			result.Warnings = append(result.Warnings, "files field should contain valid file patterns")
+		}
+	}
+
+	if pkg.Dependencies != nil {
+		for dep, version := range pkg.Dependencies {
+			if err := validateNpmCompatibleName(dep); err != nil {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("dependency name '%s' is not npm compatible", dep))
+			}
+			if version == "" {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("dependency '%s' has empty version", dep))
+			}
+		}
+	}
+}
+
+// Public API functions
+func ValidateAccessLevel(access string, packageName string) error {
+	switch AccessLevel(access) {
+	case AccessPublic:
+		if scopedNameRegex.MatchString(packageName) {
+			return fmt.Errorf("scoped packages cannot use 'public' access level, use 'scoped' or 'private'")
+		}
+		return nil
+	case AccessScoped:
+		if !scopedNameRegex.MatchString(packageName) {
+			return fmt.Errorf("only scoped packages can use 'scoped' access level")
+		}
+		return nil
+	case AccessPrivate:
+		return nil
+	default:
+		return fmt.Errorf("invalid access level '%s'. Must be one of: public, scoped, private", access)
+	}
+}
+
+func ValidateDistTag(tag string) error {
+	if tag == "" {
+		return fmt.Errorf("dist-tag cannot be empty")
+	}
+
+	if len(tag) > 64 {
+		return fmt.Errorf("dist-tag cannot be longer than 64 characters")
+	}
+
+	tagRegex := regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+	if !tagRegex.MatchString(tag) {
+		return fmt.Errorf("dist-tag can only contain letters, numbers, dots, hyphens, and underscores")
+	}
+
+	if strings.HasPrefix(tag, ".") || strings.HasPrefix(tag, "-") {
+		return fmt.Errorf("dist-tag cannot start with . or -")
+	}
+
+	return nil
+}
+
+func IsNpmCompatible(pkg *PackageJSON) bool {
+	if err := validateNpmCompatibleName(pkg.Name); err != nil {
+		return false
+	}
+
+	if err := validateSemanticVersion(pkg.Version); err != nil {
+		return false
+	}
+
+	return true
+}
+
+// Tarball utilities
 func CreateTarball(path string) (string, error) {
 	cmd := exec.Command("npm", "pack", "--json")
 	cmd.Dir = path

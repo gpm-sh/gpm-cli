@@ -3,62 +3,31 @@ package cmd
 import (
 	"archive/tar"
 	"compress/gzip"
-	"encoding/json"
+	"crypto/sha1"
+	"crypto/sha512"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"gpm.sh/gpm/gpm-cli/internal/api"
 	"gpm.sh/gpm/gpm-cli/internal/config"
+	"gpm.sh/gpm/gpm-cli/internal/filtering"
+	"gpm.sh/gpm/gpm-cli/internal/packaging"
 	"gpm.sh/gpm/gpm-cli/internal/styling"
+	"gpm.sh/gpm/gpm-cli/internal/validation"
 )
 
-// validatePath ensures the path is safe and doesn't escape the destination directory
-func validatePathPublish(filePath, destDir string) error {
-	// Clean the path to resolve any . or .. elements
-	cleanPath := filepath.Clean(filePath)
-
-	// Convert to absolute path
-	absPath, err := filepath.Abs(filepath.Join(destDir, cleanPath))
-	if err != nil {
-		return fmt.Errorf("failed to resolve absolute path: %w", err)
-	}
-
-	// Ensure the absolute path is within the destination directory
-	destAbs, err := filepath.Abs(destDir)
-	if err != nil {
-		return fmt.Errorf("failed to resolve destination directory: %w", err)
-	}
-
-	if !strings.HasPrefix(absPath, destAbs) {
-		return fmt.Errorf("path traversal attempt detected: %s", filePath)
-	}
-
-	return nil
-}
-
-// validateCommand sanitizes git command arguments
-func validateGitCommandPublish(args ...string) error {
-	for _, arg := range args {
-		// Reject arguments that could be dangerous
-		if strings.Contains(arg, ";") || strings.Contains(arg, "&") ||
-			strings.Contains(arg, "|") || strings.Contains(arg, "`") ||
-			strings.Contains(arg, "$") {
-			return fmt.Errorf("potentially dangerous command argument: %s", arg)
-		}
-	}
-	return nil
-}
-
 var (
-	publishAccess string
-	publishTag    string
-	publishDryRun bool
+	publishAccess   string
+	publishTag      string
+	publishDryRun   bool
+	publishRegistry string
+	publishScope    string
 )
 
 var publishCmd = &cobra.Command{
@@ -69,11 +38,10 @@ var publishCmd = &cobra.Command{
 Publishes a package to the registry so that it can be installed by name.
 If no package-spec is provided, publishes the package in the current directory.
 
-Package Specs (NPM Compatible):
+Package Specs:
   a) Current directory (default)          # gpm publish
   b) Folder containing package.json       # gpm publish ./my-package  
   c) Gzipped tarball (.tgz/.tar.gz)      # gpm publish package.tgz
-  d) Git remote URL                       # gpm publish git+https://github.com/user/repo.git
 
 Access Levels:
 
@@ -82,14 +50,15 @@ Access Levels:
   private     Visible only on the current studio domain and requires authentication
 
 Examples:
-  gpm publish                                          # Publish current directory
-  gpm publish ./my-package                             # Publish specific folder
-  gpm publish package.tgz                              # Publish tarball
-  gpm publish git+https://github.com/user/repo.git    # Publish from Git
-  gpm publish --access=scoped                         # Publish as scoped
-  gpm publish --access=private                        # Publish as private
-  gpm publish --tag=beta                              # Publish with dist-tag
-  gpm publish --dry-run                               # Simulate publish`,
+  gpm publish                             # Publish current directory
+  gpm publish ./my-package                # Publish specific folder
+  gpm publish package.tgz                 # Publish tarball
+  gpm publish --access=scoped             # Publish as scoped
+  gpm publish --access=private            # Publish as private
+  gpm publish --tag=beta                  # Publish with dist-tag
+  gpm publish --scope=@myscope            # Publish with specific scope
+  gpm publish --registry=https://npmjs.org # Publish to specific registry
+  gpm publish --dry-run                   # Simulate publish`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var packageSpec string
@@ -103,27 +72,44 @@ Examples:
 }
 
 func init() {
-	publishCmd.Flags().StringVar(&publishAccess, "access", "public", "Package access level (public, scoped, private)")
+	publishCmd.Flags().StringVar(&publishAccess, "access", "", "Package access level (public, scoped, private) - auto-detected if not specified")
 	publishCmd.Flags().StringVar(&publishTag, "tag", "latest", "Dist-tag to publish under")
 	publishCmd.Flags().BoolVar(&publishDryRun, "dry-run", false, "Simulate publish without uploading")
+	publishCmd.Flags().StringVar(&publishRegistry, "registry", "", "Registry URL to publish to (overrides config)")
+	publishCmd.Flags().StringVar(&publishScope, "scope", "", "Scope for scoped packages (e.g., @myscope)")
+}
+
+type PublishInfo struct {
+	PackageInfo   *validation.PackageJSON
+	TarballPath   string
+	FileSize      int64
+	Sha1          string
+	Sha512        string
+	Integrity     string
+	FilteredFiles []string
 }
 
 func publish(packageSpec string) error {
-	// Validate access level
-	validAccess := publishAccess == "public" || publishAccess == "scoped" || publishAccess == "private"
-	if !validAccess {
-		return fmt.Errorf("invalid access level '%s'. Must be one of: public, scoped, private", publishAccess)
-	}
-
 	cfg := config.GetConfig()
 	if cfg.Token == "" {
 		return fmt.Errorf("not authenticated. Run 'gpm login'")
 	}
 
-	// Determine package spec type and prepare tarball
-	tarballPath, cleanup, err := preparePackageForPublish(packageSpec)
+	registry := cfg.Registry
+	if publishRegistry != "" {
+		registry = publishRegistry
+	}
+
+	// Validate registry URL format
+	if registry != "" {
+		if !strings.HasPrefix(registry, "http://") && !strings.HasPrefix(registry, "https://") {
+			return fmt.Errorf("invalid registry URL: %s (must start with http:// or https://)", registry)
+		}
+	}
+
+	publishInfo, cleanup, err := prepareEnhancedPackageForPublish(packageSpec)
 	if err != nil {
-		return err // Error messages are already user-friendly from preparePackageForPublish
+		return err
 	}
 	defer func() {
 		if cleanup != nil {
@@ -131,14 +117,37 @@ func publish(packageSpec string) error {
 		}
 	}()
 
-	packageInfo, err := extractPackageInfo(tarballPath)
-	if err != nil {
-		return fmt.Errorf("failed to read package information: %w", err)
+	if err := validateDistTag(publishTag); err != nil {
+		return fmt.Errorf("invalid dist-tag: %w", err)
 	}
 
-	accessDescription := getAccessDescription(publishAccess)
+	// Handle scope configuration
+	packageName := publishInfo.PackageInfo.Name
+	if publishScope != "" {
+		if !strings.HasPrefix(publishScope, "@") {
+			return fmt.Errorf("scope must start with @ (e.g., @myscope)")
+		}
+		if !strings.Contains(packageName, "/") {
+			packageName = publishScope + "/" + strings.TrimPrefix(packageName, "@")
+		} else if !strings.HasPrefix(packageName, publishScope) {
+			return fmt.Errorf("package name %s doesn't match specified scope %s", packageName, publishScope)
+		}
+	}
 
-	client := api.NewClient(cfg.Registry, cfg.Token)
+	actualAccess := publishAccess
+	if actualAccess == "" {
+		actualAccess = string(determineRecommendedAccess(packageName))
+	}
+
+	if err := validateAccessLevel(actualAccess, packageName); err != nil {
+		return fmt.Errorf("access level validation failed: %w", err)
+	}
+
+	client := api.NewClient(registry, cfg.Token)
+
+	if err := performPrePublishChecks(client, publishInfo.PackageInfo, actualAccess); err != nil {
+		return fmt.Errorf("pre-publish validation failed: %w", err)
+	}
 
 	headerText := "📤 Publishing Package"
 	if publishDryRun {
@@ -147,11 +156,19 @@ func publish(packageSpec string) error {
 
 	fmt.Println(styling.Header(headerText))
 	fmt.Println(styling.Separator())
-	fmt.Printf("%s %s\n", styling.Label("Package:"), styling.Package(packageInfo.Name))
-	fmt.Printf("%s %s\n", styling.Label("Version:"), styling.Version(packageInfo.Version))
-	fmt.Printf("%s %s\n", styling.Label("Access Level:"), styling.Value(accessDescription))
+	fmt.Printf("%s %s\n", styling.Label("Package:"), styling.Package(packageName))
+	fmt.Printf("%s %s\n", styling.Label("Version:"), styling.Version(publishInfo.PackageInfo.Version))
+	fmt.Printf("%s %s\n", styling.Label("Access Level:"), styling.Value(getAccessDescription(actualAccess)))
 	fmt.Printf("%s %s\n", styling.Label("Tag:"), styling.Value(publishTag))
-	fmt.Printf("%s %s\n", styling.Label("File:"), styling.File(tarballPath))
+	fmt.Printf("%s %s\n", styling.Label("Registry:"), styling.URL(registry))
+	if publishScope != "" {
+		fmt.Printf("%s %s\n", styling.Label("Scope:"), styling.Value(publishScope))
+	}
+	fmt.Printf("%s %s\n", styling.Label("File:"), styling.File(publishInfo.TarballPath))
+	fmt.Printf("%s %d bytes (%.1f kB)\n", styling.Label("Size:"), publishInfo.FileSize, float64(publishInfo.FileSize)/1024)
+	fmt.Printf("%s %s files\n", styling.Label("Files:"), styling.Value(fmt.Sprintf("%d", len(publishInfo.FilteredFiles))))
+	fmt.Printf("%s %s\n", styling.Label("SHA1:"), styling.Hash(publishInfo.Sha1[:20]))
+	fmt.Printf("%s %s\n", styling.Label("Integrity:"), styling.Hash(publishInfo.Integrity))
 	if publishDryRun {
 		fmt.Printf("%s %s\n", styling.Label("Mode:"), styling.Warning("DRY RUN"))
 	}
@@ -160,21 +177,42 @@ func publish(packageSpec string) error {
 	if publishDryRun {
 		fmt.Println(styling.Success("✓ Dry run completed successfully!"))
 		fmt.Println(styling.Info("📋 What would be published:"))
-		fmt.Printf("  %s %s@%s\n", styling.Label("•"), styling.Package(packageInfo.Name), styling.Version(packageInfo.Version))
+		fmt.Printf("  %s %s@%s\n", styling.Label("•"), styling.Package(packageName), styling.Version(publishInfo.PackageInfo.Version))
 		fmt.Printf("  %s %s\n", styling.Label("•"), styling.Value(fmt.Sprintf("Tagged as '%s'", publishTag)))
-		fmt.Printf("  %s %s\n", styling.Label("•"), styling.Value(fmt.Sprintf("Access level: %s", accessDescription)))
+		fmt.Printf("  %s %s\n", styling.Label("•"), styling.Value(fmt.Sprintf("Access level: %s", getAccessDescription(actualAccess))))
+		fmt.Printf("  %s %s\n", styling.Label("•"), styling.Value(fmt.Sprintf("Registry: %s", registry)))
+		if publishScope != "" {
+			fmt.Printf("  %s %s\n", styling.Label("•"), styling.Value(fmt.Sprintf("Scope: %s", publishScope)))
+		}
+		fmt.Printf("  %s %d files\n", styling.Label("•"), len(publishInfo.FilteredFiles))
+
+		if len(publishInfo.FilteredFiles) > 0 && len(publishInfo.FilteredFiles) <= 20 {
+			fmt.Println(styling.Info("📁 Files to be published:"))
+			for _, file := range publishInfo.FilteredFiles {
+				fmt.Printf("    %s\n", file)
+			}
+		} else if len(publishInfo.FilteredFiles) > 20 {
+			fmt.Printf("    %s (showing first 20 of %d files)\n", styling.Info("📁 Files to be published"), len(publishInfo.FilteredFiles))
+			for i, file := range publishInfo.FilteredFiles[:20] {
+				fmt.Printf("    %s\n", file)
+				if i == 19 {
+					fmt.Printf("    ... and %d more\n", len(publishInfo.FilteredFiles)-20)
+				}
+			}
+		}
+
 		fmt.Println(styling.Hint("Use 'gpm publish' without --dry-run to actually publish"))
 		return nil
 	}
 
 	req := &api.PublishRequest{
-		Name:    packageInfo.Name,
-		Version: packageInfo.Version,
-		Access:  publishAccess,
+		Name:    packageName,
+		Version: publishInfo.PackageInfo.Version,
+		Access:  actualAccess,
 		Tag:     publishTag,
 	}
 
-	resp, err := client.Publish(req, tarballPath)
+	resp, err := client.Publish(req, publishInfo.TarballPath)
 	if err != nil {
 		return fmt.Errorf("publish failed: %v", err)
 	}
@@ -186,6 +224,7 @@ func publish(packageSpec string) error {
 		fmt.Printf("%s %s\n", styling.Label("Download URL:"), styling.URL(resp.Data.DownloadURL))
 		fmt.Printf("%s %s\n", styling.Label("File Size:"), styling.Size(fmt.Sprintf("%d bytes", resp.Data.FileSize)))
 		fmt.Printf("%s %s\n", styling.Label("Upload Time:"), styling.Value(resp.Data.UploadTime))
+		fmt.Printf("%s %s\n", styling.Label("Integrity:"), styling.Hash(publishInfo.Integrity))
 	} else {
 		if resp.Error != nil {
 			return fmt.Errorf("publish failed: %s - %s", resp.Error.Code, resp.Error.Message)
@@ -194,6 +233,243 @@ func publish(packageSpec string) error {
 	}
 
 	return nil
+}
+
+func prepareEnhancedPackageForPublish(packageSpec string) (*PublishInfo, func(), error) {
+	specType := packaging.DetectPackageSpecType(packageSpec)
+
+	switch specType {
+	case "tarball":
+		return prepareExistingTarball(packageSpec)
+	case "folder":
+		return prepareFolderWithFiltering(packageSpec)
+	case "folder_no_package_json":
+		if packageSpec == "." {
+			return nil, nil, fmt.Errorf("no package.json found in the current directory. Run this inside a package, or pass a tarball/folder")
+		} else {
+			return nil, nil, fmt.Errorf("no package.json found in %s. Run 'gpm publish .' to publish the current folder, or pass a tarball", packageSpec)
+		}
+	default:
+		if packageSpec == "." {
+			return nil, nil, fmt.Errorf("no package.json found in the current directory. Run this inside a package, or pass a tarball/folder")
+		}
+		return nil, nil, fmt.Errorf("ENOENT: no such file or directory, open '%s'. Run 'gpm publish .' to publish the current folder, or pass a tarball", packageSpec)
+	}
+}
+
+func prepareExistingTarball(tarballPath string) (*PublishInfo, func(), error) {
+	if _, err := os.Stat(tarballPath); os.IsNotExist(err) {
+		return nil, nil, fmt.Errorf("ENOENT: no such file or directory, open '%s'", tarballPath)
+	}
+
+	packageInfo, err := packaging.ExtractPackageInfo(tarballPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to extract package info: %w", err)
+	}
+
+	info, err := os.Stat(tarballPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to stat tarball: %w", err)
+	}
+
+	sha1Hash, sha512Hash, err := calculateTarballHashes(tarballPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to calculate checksums: %w", err)
+	}
+
+	integrity := fmt.Sprintf("sha512-%s", base64.StdEncoding.EncodeToString(sha512Hash))
+
+	publishInfo := &PublishInfo{
+		PackageInfo: &validation.PackageJSON{
+			Name:    packageInfo.Name,
+			Version: packageInfo.Version,
+		},
+		TarballPath: tarballPath,
+		FileSize:    info.Size(),
+		Sha1:        hex.EncodeToString(sha1Hash),
+		Sha512:      hex.EncodeToString(sha512Hash),
+		Integrity:   integrity,
+	}
+
+	return publishInfo, nil, nil
+}
+
+func prepareFolderWithFiltering(folderPath string) (*PublishInfo, func(), error) {
+	validationResult, err := validation.ValidatePackage(folderPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("validation failed: %w", err)
+	}
+
+	if !validationResult.Valid {
+		for _, validationErr := range validationResult.Errors {
+			fmt.Printf("%s %v\n", styling.Warning("⚠"), validationErr)
+		}
+		return nil, nil, fmt.Errorf("package validation failed")
+	}
+
+	filterEngine, err := filtering.NewFileFilterEngine(folderPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create file filter: %w", err)
+	}
+
+	filterResult, err := filterEngine.FilterFiles()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to filter files: %w", err)
+	}
+
+	tempDir, err := os.MkdirTemp("", "gpm-publish-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	cleanup := func() {
+		_ = os.RemoveAll(tempDir)
+	}
+
+	tarballName := fmt.Sprintf("%s-%s.tgz", validationResult.Package.Name, validationResult.Package.Version)
+	tarballPath := filepath.Join(tempDir, tarballName)
+
+	sha1Hash, sha512Hash, filteredFiles, err := createFilteredTarball(folderPath, tarballPath, filterResult)
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to create tarball: %w", err)
+	}
+
+	info, err := os.Stat(tarballPath)
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("failed to stat created tarball: %w", err)
+	}
+
+	integrity := fmt.Sprintf("sha512-%s", base64.StdEncoding.EncodeToString(sha512Hash))
+
+	publishInfo := &PublishInfo{
+		PackageInfo:   validationResult.Package,
+		TarballPath:   tarballPath,
+		FileSize:      info.Size(),
+		Sha1:          hex.EncodeToString(sha1Hash),
+		Sha512:        hex.EncodeToString(sha512Hash),
+		Integrity:     integrity,
+		FilteredFiles: filteredFiles,
+	}
+
+	return publishInfo, cleanup, nil
+}
+
+func createFilteredTarball(srcDir, tarballPath string, filterResult *filtering.FilterResult) ([]byte, []byte, []string, error) {
+	file, err := os.Create(tarballPath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	gzWriter := gzip.NewWriter(file)
+	defer func() { _ = gzWriter.Close() }()
+
+	tarWriter := tar.NewWriter(gzWriter)
+	defer func() { _ = tarWriter.Close() }()
+
+	sha1Hash := sha1.New()
+	sha512Hash := sha512.New()
+	var filteredFiles []string
+
+	for _, filteredFile := range filterResult.Files {
+		if filteredFile.IsDir {
+			continue
+		}
+
+		filteredFiles = append(filteredFiles, filteredFile.RelativePath)
+		relativePath := strings.ReplaceAll(filteredFile.RelativePath, "\\", "/")
+
+		info, err := os.Stat(filteredFile.AbsolutePath)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to stat file %s: %w", filteredFile.RelativePath, err)
+		}
+
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to create tar header: %w", err)
+		}
+
+		header.Name = fmt.Sprintf("package/%s", relativePath)
+		if err := tarWriter.WriteHeader(header); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write tar header: %w", err)
+		}
+
+		fileData, err := os.ReadFile(filteredFile.AbsolutePath)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to read file %s: %w", filteredFile.RelativePath, err)
+		}
+
+		if _, err := tarWriter.Write(fileData); err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to write file data: %w", err)
+		}
+
+		sha1Hash.Write(fileData)
+		sha512Hash.Write(fileData)
+	}
+
+	return sha1Hash.Sum(nil), sha512Hash.Sum(nil), filteredFiles, nil
+}
+
+func calculateTarballHashes(tarballPath string) ([]byte, []byte, error) {
+	file, err := os.Open(tarballPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	sha1Hash := sha1.New()
+	sha512Hash := sha512.New()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = gzr.Close() }()
+
+	tr := tar.NewReader(gzr)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if header.Typeflag == tar.TypeReg {
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				return nil, nil, err
+			}
+			sha1Hash.Write(data)
+			sha512Hash.Write(data)
+		}
+	}
+
+	return sha1Hash.Sum(nil), sha512Hash.Sum(nil), nil
+}
+
+func performPrePublishChecks(client *api.Client, pkg *validation.PackageJSON, access string) error {
+	return nil
+}
+
+func validateDistTag(tag string) error {
+	return validation.ValidateDistTag(tag)
+}
+
+func validateAccessLevel(access, packageName string) error {
+	return validation.ValidateAccessLevel(access, packageName)
+}
+
+func determineRecommendedAccess(name string) validation.AccessLevel {
+	result, _ := validation.ValidatePackage(".")
+	if result != nil {
+		return result.RecommendedAccess
+	}
+	return validation.AccessPublic
 }
 
 func getAccessDescription(access string) string {
@@ -207,321 +483,4 @@ func getAccessDescription(access string) string {
 	default:
 		return "Public"
 	}
-}
-
-func extractPackageInfo(tarballPath string) (*PackageInfo, error) {
-	// Security: Validate the tarball path
-	cleanPath := filepath.Clean(tarballPath)
-	if !strings.HasSuffix(cleanPath, ".tgz") && !strings.HasSuffix(cleanPath, ".tar.gz") {
-		return nil, fmt.Errorf("invalid file type: only .tgz and .tar.gz files are allowed")
-	}
-
-	file, err := os.Open(cleanPath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = file.Close() }()
-
-	gzr, err := gzip.NewReader(file)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = gzr.Close() }()
-
-	tr := tar.NewReader(gzr)
-
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		if header.Name == "package/package.json" {
-			data, err := io.ReadAll(tr)
-			if err != nil {
-				return nil, err
-			}
-
-			var packageInfo PackageInfo
-			if err := json.Unmarshal(data, &packageInfo); err != nil {
-				return nil, err
-			}
-
-			return &packageInfo, nil
-		}
-	}
-
-	return nil, fmt.Errorf("package.json not found in tarball")
-}
-
-func preparePackageForPublish(packageSpec string) (tarballPath string, cleanup func(), err error) {
-	specType := detectPackageSpecType(packageSpec)
-
-	switch specType {
-	case "tarball":
-		// Validate tarball exists
-		if _, err := os.Stat(packageSpec); os.IsNotExist(err) {
-			return "", nil, fmt.Errorf("ENOENT: no such file or directory, open '%s'", packageSpec)
-		}
-		return packageSpec, nil, nil
-
-	case "folder":
-		// Pack folder into temporary tarball
-		return packFolderToTarball(packageSpec)
-
-	case "folder_no_package_json":
-		// Handle missing package.json case with npm-like error
-		if packageSpec == "." {
-			return "", nil, fmt.Errorf("no package.json found in the current directory. Run this inside a package, or pass a tarball/folder/git URL")
-		} else {
-			return "", nil, fmt.Errorf("no package.json found in %s. Run 'gpm publish .' to publish the current folder, or pass a tarball/git URL", packageSpec)
-		}
-
-	case "git":
-		// Clone git repo and pack into temporary tarball
-		return packGitRepoToTarball(packageSpec)
-
-	default:
-		if packageSpec == "." {
-			return "", nil, fmt.Errorf("no package.json found in the current directory. Run this inside a package, or pass a tarball/folder/git URL")
-		}
-		return "", nil, fmt.Errorf("ENOENT: no such file or directory, open '%s'. Run 'gpm publish .' to publish the current folder, or pass a tarball/git URL", packageSpec)
-	}
-}
-
-func detectPackageSpecType(packageSpec string) string {
-	// Check if it's a Git URL
-	if isGitURL(packageSpec) {
-		return "git"
-	}
-
-	// Check if it's a tarball file
-	if strings.HasSuffix(packageSpec, ".tgz") || strings.HasSuffix(packageSpec, ".tar.gz") {
-		return "tarball"
-	}
-
-	// Check if it's a folder with package.json
-	if stat, err := os.Stat(packageSpec); err == nil && stat.IsDir() {
-		packageJSONPath := filepath.Join(packageSpec, "package.json")
-		if _, err := os.Stat(packageJSONPath); err == nil {
-			return "folder"
-		}
-		// Directory exists but no package.json
-		return "folder_no_package_json"
-	}
-
-	return "unknown"
-}
-
-func isGitURL(spec string) bool {
-	gitPatterns := []string{
-		`^git\+https?://`,
-		`^git\+ssh://`,
-		`^git://`,
-		`^https://.*\.git($|#)`,
-		`^ssh://.*\.git($|#)`,
-	}
-
-	for _, pattern := range gitPatterns {
-		if matched, _ := regexp.MatchString(pattern, spec); matched {
-			return true
-		}
-	}
-
-	return false
-}
-
-func packFolderToTarball(folderPath string) (string, func(), error) {
-	// Create temporary tarball
-	tempDir, err := os.MkdirTemp("", "gpm-publish-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create temp directory: %w", err)
-	}
-
-	cleanup := func() {
-		_ = os.RemoveAll(tempDir) // Best effort cleanup
-	}
-
-	// Read package.json to get name and version
-	packageJSONPath := filepath.Join(folderPath, "package.json")
-	if err := validatePathPublish(packageJSONPath, folderPath); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("invalid path: %w", err)
-	}
-	data, err := os.ReadFile(packageJSONPath) // #nosec G304 - Path validated above
-	if err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("failed to read package.json: %w", err)
-	}
-
-	var pkg map[string]interface{}
-	if err := json.Unmarshal(data, &pkg); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("failed to parse package.json: %w", err)
-	}
-
-	name, ok := pkg["name"].(string)
-	if !ok || name == "" {
-		cleanup()
-		return "", nil, fmt.Errorf("missing required field 'name' in package.json")
-	}
-
-	version, ok := pkg["version"].(string)
-	if !ok || version == "" {
-		cleanup()
-		return "", nil, fmt.Errorf("missing required field 'version' in package.json")
-	}
-
-	tarballName := fmt.Sprintf("%s-%s.tgz", name, version)
-	tarballPath := filepath.Join(tempDir, tarballName)
-
-	// Create tarball using gpm pack logic
-	if err := createTarballFromFolder(folderPath, tarballPath); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("failed to create tarball: %w", err)
-	}
-
-	return tarballPath, cleanup, nil
-}
-
-func packGitRepoToTarball(gitURL string) (string, func(), error) {
-	// Create temporary directory for cloning
-	tempDir, err := os.MkdirTemp("", "gpm-git-publish-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to create temp directory: %w", err)
-	}
-
-	cleanup := func() {
-		_ = os.RemoveAll(tempDir) // Best effort cleanup
-	}
-
-	cloneDir := filepath.Join(tempDir, "repo")
-
-	// Parse Git URL to extract branch/tag if specified
-	gitURL, branch := parseGitURL(gitURL)
-
-	// Clone repository with input validation
-	var cmd *exec.Cmd
-	if branch != "" {
-		if err := validateGitCommandPublish("clone", "--branch", branch, "--depth", "1", gitURL, cloneDir); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("invalid git command arguments: %w", err)
-		}
-		cmd = exec.Command("git", "clone", "--branch", branch, "--depth", "1", gitURL, cloneDir) // #nosec G204 - Git command validated above
-	} else {
-		if err := validateGitCommandPublish("clone", "--depth", "1", gitURL, cloneDir); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("invalid git command arguments: %w", err)
-		}
-		cmd = exec.Command("git", "clone", "--depth", "1", gitURL, cloneDir) // #nosec G204 - Git command validated above
-	}
-
-	if err := cmd.Run(); err != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("failed to clone repository: %w", err)
-	}
-
-	// Remove .git directory
-	gitDir := filepath.Join(cloneDir, ".git")
-	_ = os.RemoveAll(gitDir) // Best effort cleanup
-
-	// Now pack the cloned folder
-	tarballPath, _, err := packFolderToTarball(cloneDir)
-	if err != nil {
-		cleanup()
-		return "", nil, err
-	}
-
-	return tarballPath, cleanup, nil
-}
-
-func parseGitURL(gitURL string) (cleanURL, branch string) {
-	// Handle fragment (branch/tag) in Git URL: git+https://github.com/user/repo.git#branch
-	if idx := strings.Index(gitURL, "#"); idx != -1 {
-		branch = gitURL[idx+1:]
-		gitURL = gitURL[:idx]
-	}
-
-	// Remove git+ prefix
-	gitURL = strings.TrimPrefix(gitURL, "git+")
-
-	return gitURL, branch
-}
-
-func createTarballFromFolder(srcDir, tarballPath string) error {
-	// Validate tarball path
-	if err := validatePathPublish(tarballPath, "."); err != nil {
-		return fmt.Errorf("invalid tarball path: %w", err)
-	}
-	// Create tarball file
-	file, err := os.Create(tarballPath) // #nosec G304 - Path validated above
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	// Create gzip writer
-	gzWriter := gzip.NewWriter(file)
-	defer func() { _ = gzWriter.Close() }()
-
-	// Create tar writer
-	tarWriter := tar.NewWriter(gzWriter)
-	defer func() { _ = tarWriter.Close() }()
-
-	// Walk directory and add files to tar
-	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Get relative path from source directory
-		relPath, err := filepath.Rel(srcDir, path)
-		if err != nil {
-			return err
-		}
-
-		// Skip the root directory itself
-		if relPath == "." {
-			return nil
-		}
-
-		// Add "package/" prefix (npm standard)
-		tarPath := filepath.Join("package", relPath)
-
-		// Create tar header
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return err
-		}
-		header.Name = tarPath
-
-		// Write header
-		if err := tarWriter.WriteHeader(header); err != nil {
-			return err
-		}
-
-		// Write file content if it's a regular file
-		if info.Mode().IsRegular() {
-			// Validate path to prevent access to files outside the intended directory
-			if err := validatePathPublish(relPath, srcDir); err != nil {
-				return fmt.Errorf("security validation failed: %w", err)
-			}
-
-			srcFile, err := os.Open(path) // #nosec G304 - Path validated by filepath.Walk
-			if err != nil {
-				return err
-			}
-			defer func() {
-				_ = srcFile.Close() // Handle error from defer
-			}()
-
-			_, err = io.Copy(tarWriter, srcFile)
-			return err
-		}
-
-		return nil
-	})
 }

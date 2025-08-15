@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gpm.sh/gpm/gpm-cli/internal/api"
 	"gpm.sh/gpm/gpm-cli/internal/config"
+	"gpm.sh/gpm/gpm-cli/internal/packaging"
 )
 
 func TestPublishCmd(t *testing.T) {
@@ -77,7 +78,7 @@ func TestExtractPackageInfo(t *testing.T) {
 			require.NoError(t, os.WriteFile("package.json", []byte(tt.packageJSON), 0644))
 
 			cmd := &cobra.Command{}
-			err := packPackage(cmd, []string{})
+			err := packPackages(cmd, []string{})
 
 			if tt.expectError {
 				// If pack fails due to missing name/version, that's expected
@@ -92,7 +93,7 @@ func TestExtractPackageInfo(t *testing.T) {
 			require.Len(t, files, 1, "Expected exactly one .tgz file")
 
 			// Test extraction
-			result, err := extractPackageInfo(files[0])
+			result, err := packaging.ExtractPackageInfo(files[0])
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -211,7 +212,7 @@ func TestPublishFunction(t *testing.T) {
 
 			// Create tarball
 			cmd := &cobra.Command{}
-			err := packPackage(cmd, []string{})
+			err := packPackages(cmd, []string{})
 			require.NoError(t, err)
 
 			files, err := filepath.Glob("*.tgz")

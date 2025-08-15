@@ -102,6 +102,41 @@ type WhoamiResponse struct {
 	Username string `json:"username"`
 }
 
+// OAuth 2.0 Authorization Code with PKCE structures
+type OAuthAuthorizationRequest struct {
+	ClientID            string `json:"client_id"`
+	RedirectURI         string `json:"redirect_uri"`
+	ResponseType        string `json:"response_type"`
+	Scope               string `json:"scope"`
+	State               string `json:"state"`
+	CodeChallenge       string `json:"code_challenge"`
+	CodeChallengeMethod string `json:"code_challenge_method"`
+}
+
+type OAuthTokenRequest struct {
+	GrantType    string `json:"grant_type"`
+	Code         string `json:"code"`
+	RedirectURI  string `json:"redirect_uri"`
+	ClientID     string `json:"client_id"`
+	CodeVerifier string `json:"code_verifier"`
+}
+
+type OAuthTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Scope        string `json:"scope,omitempty"`
+}
+
+type OAuthErrorResponse struct {
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description,omitempty"`
+	ErrorURI         string `json:"error_uri,omitempty"`
+	State            string `json:"state,omitempty"`
+}
+
+// Legacy web login structures (deprecated - use OAuth instead)
 type WebLoginRequest struct {
 	SessionID string `json:"sessionId"`
 }
@@ -210,6 +245,53 @@ func (c *Client) Whoami() (*WhoamiResponse, error) {
 	return &whoamiResp, nil
 }
 
+// OAuth 2.0 Authorization Code with PKCE methods
+func (c *Client) StartOAuthFlow(authorizationURL string) (string, error) {
+	// Open browser to authorization URL
+	return authorizationURL, nil
+}
+
+func (c *Client) ExchangeCodeForToken(code, clientID, redirectURI, codeVerifier string) (*OAuthTokenResponse, error) {
+	tokenRequest := OAuthTokenRequest{
+		GrantType:    "authorization_code",
+		Code:         code,
+		RedirectURI:  redirectURI,
+		ClientID:     clientID,
+		CodeVerifier: codeVerifier,
+	}
+
+	reqBody, err := json.Marshal(tokenRequest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal token request: %w", err)
+	}
+
+	headers := map[string]string{
+		"Content-Type": "application/json",
+	}
+
+	resp, err := c.makeRequest("POST", "/oauth/token", reqBody, headers)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		var oauthErr OAuthErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&oauthErr); err != nil {
+			return nil, fmt.Errorf("oauth token exchange failed with status %d", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("oauth error: %s - %s", oauthErr.Error, oauthErr.ErrorDescription)
+	}
+
+	var tokenResp OAuthTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, fmt.Errorf("failed to decode token response: %w", err)
+	}
+
+	return &tokenResp, nil
+}
+
+// Legacy web login methods (deprecated - use OAuth instead)
 func (c *Client) StartWebLogin() (*WebLoginResponse, error) {
 	resp, err := c.makeRequest("POST", "/-/v1/login/web", nil, nil)
 	if err != nil {
