@@ -3,7 +3,7 @@ package cmd
 import (
 	"archive/tar"
 	"compress/gzip"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 - Required for npm compatibility
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
@@ -253,7 +253,7 @@ func createPackage(sourceDir string, pkg *validation.PackageJSON, filterResult *
 	tw := tar.NewWriter(gw)
 	defer func() { _ = tw.Close() }()
 
-	sha1Hash := sha1.New()
+	sha1Hash := sha1.New() // #nosec G401 - Required for npm compatibility
 	sha512Hash := sha512.New()
 
 	var filePaths []string
@@ -291,7 +291,7 @@ func createPackage(sourceDir string, pkg *validation.PackageJSON, filterResult *
 			return nil, fmt.Errorf("failed to write file data: %w", err)
 		}
 
-		sha1Hash.Write(fileData)
+		sha1Hash.Write(fileData) // #nosec G401 - Required for npm compatibility
 		sha512Hash.Write(fileData)
 	}
 
@@ -300,7 +300,7 @@ func createPackage(sourceDir string, pkg *validation.PackageJSON, filterResult *
 		return nil, fmt.Errorf("failed to get file info: %w", err)
 	}
 
-	sha1Bytes := sha1Hash.Sum(nil)
+	sha1Bytes := sha1Hash.Sum(nil) // #nosec G401 - Required for npm compatibility
 	sha512Bytes := sha512Hash.Sum(nil)
 	integrity := fmt.Sprintf("sha512-%s", base64.StdEncoding.EncodeToString(sha512Bytes))
 
@@ -312,7 +312,7 @@ func createPackage(sourceDir string, pkg *validation.PackageJSON, filterResult *
 		FileCount:    filterResult.FileCount,
 		UnpackedSize: filterResult.TotalSize,
 		PackedSize:   fileInfo.Size(),
-		Sha1:         hex.EncodeToString(sha1Bytes),
+		Sha1:         hex.EncodeToString(sha1Bytes), // #nosec G401 - Required for npm compatibility
 		Sha512:       hex.EncodeToString(sha512Bytes),
 		Integrity:    integrity,
 	}

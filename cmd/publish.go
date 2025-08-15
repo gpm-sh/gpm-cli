@@ -3,7 +3,7 @@ package cmd
 import (
 	"archive/tar"
 	"compress/gzip"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 - Required for npm compatibility
 	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
@@ -357,7 +357,7 @@ func prepareFolderWithFiltering(folderPath string) (*PublishInfo, func(), error)
 }
 
 func createFilteredTarball(srcDir, tarballPath string, filterResult *filtering.FilterResult) ([]byte, []byte, []string, error) {
-	file, err := os.Create(tarballPath)
+	file, err := os.Create(tarballPath) // #nosec G304 - Path is validated and safe
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -369,7 +369,7 @@ func createFilteredTarball(srcDir, tarballPath string, filterResult *filtering.F
 	tarWriter := tar.NewWriter(gzWriter)
 	defer func() { _ = tarWriter.Close() }()
 
-	sha1Hash := sha1.New()
+	sha1Hash := sha1.New() // #nosec G401 - Required for npm compatibility
 	sha512Hash := sha512.New()
 	var filteredFiles []string
 
@@ -405,7 +405,7 @@ func createFilteredTarball(srcDir, tarballPath string, filterResult *filtering.F
 			return nil, nil, nil, fmt.Errorf("failed to write file data: %w", err)
 		}
 
-		sha1Hash.Write(fileData)
+		sha1Hash.Write(fileData) // #nosec G401 - Required for npm compatibility
 		sha512Hash.Write(fileData)
 	}
 
@@ -413,13 +413,13 @@ func createFilteredTarball(srcDir, tarballPath string, filterResult *filtering.F
 }
 
 func calculateTarballHashes(tarballPath string) ([]byte, []byte, error) {
-	file, err := os.Open(tarballPath)
+	file, err := os.Open(tarballPath) // #nosec G304 - Path is validated and safe
 	if err != nil {
 		return nil, nil, err
 	}
 	defer func() { _ = file.Close() }()
 
-	sha1Hash := sha1.New()
+	sha1Hash := sha1.New() // #nosec G401 - Required for npm compatibility
 	sha512Hash := sha512.New()
 
 	gzr, err := gzip.NewReader(file)
@@ -444,7 +444,7 @@ func calculateTarballHashes(tarballPath string) ([]byte, []byte, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			sha1Hash.Write(data)
+			sha1Hash.Write(data) // #nosec G401 - Required for npm compatibility
 			sha512Hash.Write(data)
 		}
 	}

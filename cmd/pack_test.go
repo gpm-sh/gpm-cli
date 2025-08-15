@@ -214,10 +214,15 @@ func TestPackMultiplePackages(t *testing.T) {
 	err := packPackages(cmd, packages)
 	assert.NoError(t, err)
 
-	// Verify tarballs were created
-	for _, pkg := range packages {
-		files, err := filepath.Glob(filepath.Join(pkg, "*.tgz"))
-		require.NoError(t, err)
-		assert.Len(t, files, 1, "Expected exactly one .tgz file for package %s", pkg)
+	// Verify tarballs were created in the current directory
+	// The packPackages function creates tarballs in the current working directory
+	files, err := filepath.Glob("*.tgz")
+	require.NoError(t, err)
+	assert.Len(t, files, 2, "Expected exactly two .tgz files for the two packages")
+
+	// Verify the expected filenames
+	expectedFiles := []string{"package1-1.0.0.tgz", "package2-1.0.0.tgz"}
+	for _, expectedFile := range expectedFiles {
+		assert.Contains(t, files, expectedFile, "Expected file %s to be created", expectedFile)
 	}
 }

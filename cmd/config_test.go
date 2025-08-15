@@ -122,7 +122,7 @@ func TestConfigCmdIntegration(t *testing.T) {
 func TestConfigPersistence(t *testing.T) {
 	// Setup temporary config for testing
 	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, ".gpm", "config.yaml")
+	configPath := filepath.Join(tempDir, ".gpmrc") // Config uses .gpmrc, not .gpm/config.yaml
 
 	originalHome := os.Getenv("HOME")
 	defer func() { _ = os.Setenv("HOME", originalHome) }()

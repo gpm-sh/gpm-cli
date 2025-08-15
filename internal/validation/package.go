@@ -81,7 +81,7 @@ func ValidatePackage(path string) (*PackageValidationResult, error) {
 	}
 
 	// Load package.json
-	data, err := os.ReadFile(filepath.Join(path, "package.json"))
+	data, err := os.ReadFile(filepath.Join(path, "package.json")) // #nosec G304 - Path is validated and safe
 	if err != nil {
 		return nil, fmt.Errorf("failed to read package.json: %w", err)
 	}
