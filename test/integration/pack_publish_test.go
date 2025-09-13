@@ -126,6 +126,11 @@ func (s *PackPublishSuite) TestPackPublishWorkflow() {
 	_, err = cmd.CombinedOutput()
 	require.NoError(s.T(), err)
 
+	// Set up authentication for publish command
+	cmd = exec.Command(s.gpmBinary, "config", "set", "token", "test-token-123")
+	_, err = cmd.CombinedOutput()
+	require.NoError(s.T(), err)
+
 	tarball := "com.integration.test-package-1.0.0.tgz"
 	cmd = exec.Command(s.gpmBinary, "publish", tarball)
 	output, _ := cmd.CombinedOutput()

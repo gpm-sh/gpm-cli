@@ -75,7 +75,7 @@ func TestInstallCmdStructure(t *testing.T) {
 	// Test command structure
 	assert.NotNil(t, installCmd)
 	assert.Equal(t, "install [package[@version]...]", installCmd.Use)
-	assert.Equal(t, "Install packages", installCmd.Short)
+	assert.Equal(t, "Install packages with multi-engine support", installCmd.Short)
 	assert.NotEmpty(t, installCmd.Long)
 	assert.NotNil(t, installCmd.RunE)
 	assert.False(t, installCmd.HasSubCommands())

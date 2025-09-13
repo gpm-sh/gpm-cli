@@ -70,14 +70,21 @@ func runAddCommand(cmd *cobra.Command, args []string) error {
 		Details: make(map[string]any),
 	}
 
-	// Check if JSON flag was actually set for this specific command execution
-	// This avoids global state contamination between tests
-	useJSON := false
-	if cmd.Flags().Changed("json") {
-		useJSON, _ = cmd.Flags().GetBool("json")
-	}
+	// Check if JSON flag was set for this specific command execution
+	useJSON, _ := cmd.Flags().GetBool("json")
 
-	if err := executeAdd(packageSpec, output); err != nil {
+	// Get flag values before resetting global variables
+	projectFlag, _ := cmd.Flags().GetString("project")
+	engineFlag, _ := cmd.Flags().GetString("engine")
+	registryFlag, _ := cmd.Flags().GetString("registry")
+
+	// Reset global variables after getting flag values to avoid contamination
+	addProject = ""
+	addEngine = "auto"
+	addRegistry = ""
+	addJSON = false
+
+	if err := executeAddWithFlags(packageSpec, output, projectFlag, engineFlag, registryFlag); err != nil {
 		output.Error = err.Error()
 		if useJSON {
 			_ = printAddJSON(cmd, output)
@@ -94,7 +101,7 @@ func runAddCommand(cmd *cobra.Command, args []string) error {
 	return printAddHuman(cmd, output)
 }
 
-func executeAdd(packageSpec string, output *AddOutput) error {
+func executeAddWithFlags(packageSpec string, output *AddOutput, projectFlag, engineFlag, registryFlag string) error {
 	// Parse package specification
 	packageName, version, err := parseAddPackageSpec(packageSpec)
 	if err != nil {
@@ -105,7 +112,7 @@ func executeAdd(packageSpec string, output *AddOutput) error {
 	output.Version = version
 
 	// Determine project path
-	projectPath := addProject
+	projectPath := projectFlag
 	if projectPath == "" {
 		var err error
 		projectPath, err = os.Getwd()
@@ -121,7 +128,7 @@ func executeAdd(packageSpec string, output *AddOutput) error {
 	output.Project = projectPath
 
 	// Detect or validate engine
-	engineType, err := detectOrValidateEngine(projectPath, addEngine)
+	engineType, err := detectOrValidateEngine(projectPath, engineFlag)
 	if err != nil {
 		return err
 	}
@@ -139,7 +146,7 @@ func executeAdd(packageSpec string, output *AddOutput) error {
 	}
 
 	// Determine registry
-	registryURL := addRegistry
+	registryURL := registryFlag
 	if registryURL == "" {
 		if registryURL, err = getConfiguredRegistry(); err != nil {
 			return fmt.Errorf("no registry configured. Please run 'gpm config set registry <url>' or use --registry flag")
