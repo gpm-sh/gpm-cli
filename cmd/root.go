@@ -15,9 +15,12 @@ func AddCommands(rootCmd *cobra.Command) {
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(uninstallCmd)
+	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(updateCmd)
+	// Multi-engine commands
+	rootCmd.AddCommand(detectCmd)
 }

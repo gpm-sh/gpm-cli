@@ -43,15 +43,15 @@ func TestPackageValidation(t *testing.T) {
 		t.Errorf("Expected public access for unscoped package, got %s", result.RecommendedAccess)
 	}
 
-	// Test scoped package
-	scopedPackageJSON := `{
-		"name": "@test-scope/test-package",
+	// Test normal package with Unity-style naming
+	unityPackageJSON := `{
+		"name": "com.unity.test-package",
 		"version": "1.0.0",
-		"description": "Test scoped package"
+		"description": "Test Unity-style package"
 	}`
-	err = os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(scopedPackageJSON), 0644)
+	err = os.WriteFile(filepath.Join(tempDir, "package.json"), []byte(unityPackageJSON), 0644)
 	if err != nil {
-		t.Fatalf("Failed to write scoped package.json: %v", err)
+		t.Fatalf("Failed to write Unity package.json: %v", err)
 	}
 
 	result, err = ValidatePackage(tempDir)
@@ -59,8 +59,8 @@ func TestPackageValidation(t *testing.T) {
 		t.Fatalf("Validation failed: %v", err)
 	}
 
-	if result.RecommendedAccess != AccessScoped {
-		t.Errorf("Expected scoped access for scoped package, got %s", result.RecommendedAccess)
+	if result.RecommendedAccess != AccessPublic {
+		t.Errorf("Expected public access for Unity-style package, got %s", result.RecommendedAccess)
 	}
 
 	t.Log("Package validation test passed")
@@ -134,11 +134,11 @@ func TestAccessLevelValidation(t *testing.T) {
 		shouldPass  bool
 	}{
 		{"public", "my-package", true},
-		{"public", "@scope/package", false}, // scoped packages can't be public
-		{"scoped", "my-package", false},     // unscoped packages can't be scoped
-		{"scoped", "@scope/package", true},
+		{"public", "com.unity.package", true},
+		{"scoped", "my-package", true},
+		{"scoped", "x-package", true},
 		{"private", "my-package", true},
-		{"private", "@scope/package", true},
+		{"private", "com.unity.package", true},
 		{"invalid", "my-package", false},
 	}
 

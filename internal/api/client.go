@@ -48,6 +48,45 @@ type PackageInfo struct {
 	RawData map[string]interface{} `json:"-"` // Store the raw package.json data
 }
 
+// PackageMetadata represents complete package metadata from registry
+type PackageMetadata struct {
+	Name        string                     `json:"name"`
+	Description string                     `json:"description,omitempty"`
+	DistTags    map[string]string          `json:"dist-tags,omitempty"`
+	Versions    map[string]*PackageVersion `json:"versions,omitempty"`
+	Time        map[string]string          `json:"time,omitempty"`
+	Author      interface{}                `json:"author,omitempty"`
+	License     string                     `json:"license,omitempty"`
+	Repository  interface{}                `json:"repository,omitempty"`
+	Homepage    string                     `json:"homepage,omitempty"`
+	Keywords    []string                   `json:"keywords,omitempty"`
+}
+
+// PackageVersion represents a specific version of a package
+type PackageVersion struct {
+	Name         string            `json:"name"`
+	Version      string            `json:"version"`
+	Description  string            `json:"description,omitempty"`
+	Author       interface{}       `json:"author,omitempty"`
+	License      string            `json:"license,omitempty"`
+	Repository   interface{}       `json:"repository,omitempty"`
+	Homepage     string            `json:"homepage,omitempty"`
+	Keywords     []string          `json:"keywords,omitempty"`
+	Dependencies map[string]string `json:"dependencies,omitempty"`
+	Dist         *PackageDist      `json:"dist,omitempty"`
+	Unity        string            `json:"unity,omitempty"`
+	DisplayName  string            `json:"displayName,omitempty"`
+	Category     string            `json:"category,omitempty"`
+}
+
+// PackageDist represents distribution metadata for a package version
+type PackageDist struct {
+	Integrity string `json:"integrity,omitempty"`
+	Shasum    string `json:"shasum,omitempty"`
+	Tarball   string `json:"tarball,omitempty"`
+	FileSize  int64  `json:"fileSize,omitempty"`
+}
+
 type PublishData struct {
 	PackageID   string `json:"packageId"`
 	VersionID   string `json:"versionId"`
@@ -186,6 +225,99 @@ func (c *Client) GetPackageInfo(name, version string) (*PackageInfo, error) {
 	return &info, nil
 }
 
+// GetPackageMetadata retrieves complete package metadata including all versions and dist-tags
+func (c *Client) GetPackageMetadata(name string) (*PackageMetadata, error) {
+	// Try registry-specific endpoint first
+	endpoint := fmt.Sprintf("/%s", name)
+
+	resp, err := c.makeRequest("GET", endpoint, nil, nil)
+	if err != nil {
+		// Check for 404 to provide better error message
+		if resp != nil && resp.StatusCode == 404 {
+			return nil, fmt.Errorf("package '%s' not found", name)
+		}
+		return nil, fmt.Errorf("failed to fetch package metadata: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == 404 {
+		return nil, fmt.Errorf("package '%s' not found", name)
+	}
+
+	var metadata PackageMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		return nil, fmt.Errorf("failed to decode package metadata: %w", err)
+	}
+
+	// Validate that we got a valid package
+	if metadata.Name == "" {
+		return nil, fmt.Errorf("invalid package response: missing name")
+	}
+
+	return &metadata, nil
+}
+
+// CheckPackageExists checks if a package exists in the registry
+func (c *Client) CheckPackageExists(name string) (bool, error) {
+	_, err := c.GetPackageMetadata(name)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// GetPackageVersions returns all available versions for a package
+func (c *Client) GetPackageVersions(name string) ([]string, error) {
+	metadata, err := c.GetPackageMetadata(name)
+	if err != nil {
+		return nil, err
+	}
+
+	var versions []string
+	for version := range metadata.Versions {
+		versions = append(versions, version)
+	}
+
+	return versions, nil
+}
+
+// ResolvePackageVersion resolves a version specification to a concrete version
+func (c *Client) ResolvePackageVersion(name, versionSpec string) (string, error) {
+	metadata, err := c.GetPackageMetadata(name)
+	if err != nil {
+		return "", err
+	}
+
+	// If no version specified, or "latest", use latest dist-tag
+	if versionSpec == "" || versionSpec == "latest" {
+		if metadata.DistTags == nil {
+			return "", fmt.Errorf("package '%s' has no dist-tags - no default version available", name)
+		}
+
+		latestVersion, exists := metadata.DistTags["latest"]
+		if !exists || latestVersion == "" {
+			return "", fmt.Errorf("package '%s' has no 'latest' dist-tag - no default version available", name)
+		}
+
+		// Verify the latest version actually exists
+		if metadata.Versions == nil || metadata.Versions[latestVersion] == nil {
+			return "", fmt.Errorf("package '%s' latest version '%s' is invalid", name, latestVersion)
+		}
+
+		return latestVersion, nil
+	}
+
+	// If specific version requested, verify it exists
+	if metadata.Versions == nil || metadata.Versions[versionSpec] == nil {
+		return "", fmt.Errorf("version '%s' not available for package '%s'", versionSpec, name)
+	}
+
+	return versionSpec, nil
+}
+
 func (c *Client) Login(req *LoginRequest) (*LoginResponse, error) {
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -195,17 +327,24 @@ func (c *Client) Login(req *LoginRequest) (*LoginResponse, error) {
 	resp, err := c.makeRequest("POST", "/-/v1/login", data, map[string]string{
 		"Content-Type": "application/json",
 	})
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
+	if err == nil {
+		defer func() { _ = resp.Body.Close() }()
 
-	var loginResp LoginResponse
-	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
-		return nil, fmt.Errorf("failed to decode login response: %w", err)
+		var loginResp LoginResponse
+		if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
+			return nil, fmt.Errorf("failed to decode login response: %w", err)
+		}
+
+		return &loginResp, nil
 	}
 
-	return &loginResp, nil
+	// Fallback to npm/verdaccio CouchDB-style login if primary endpoint failed
+	npmResp, npmErr := c.npmCompatibleLogin(req)
+	if npmErr == nil {
+		return npmResp, nil
+	}
+
+	return nil, err
 }
 
 func (c *Client) Register(req *RegisterRequest) (*RegisterResponse, error) {
@@ -324,12 +463,6 @@ func (c *Client) CheckWebLogin(sessionID string) (*WebLoginStatus, error) {
 }
 
 func (c *Client) Publish(req *PublishRequest, tarballPath string) (*PublishResponse, error) {
-	// First extract the actual package.json from the tarball
-	packageInfo, err := extractPackageInfo(tarballPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to extract package info: %w", err)
-	}
-
 	// Security: Validate the tarball path
 	cleanPath := filepath.Clean(tarballPath)
 	if !strings.HasSuffix(cleanPath, ".tgz") && !strings.HasSuffix(cleanPath, ".tar.gz") {
@@ -346,6 +479,12 @@ func (c *Client) Publish(req *PublishRequest, tarballPath string) (*PublishRespo
 	tarballData, err := io.ReadAll(file)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read tarball: %w", err)
+	}
+
+	// First extract the actual package.json from the tarball
+	packageInfo, err := extractPackageInfoWithTarballData(tarballData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract package info: %w", err)
 	}
 
 	// Create npm publish format request using the actual package.json data
@@ -387,28 +526,53 @@ func (c *Client) Publish(req *PublishRequest, tarballPath string) (*PublishRespo
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// Read response body for flexible handling
+	respBody, _ := io.ReadAll(resp.Body)
+
+	// Try to decode into our structured response first
 	var publishResp PublishResponse
-	if err := json.NewDecoder(resp.Body).Decode(&publishResp); err != nil {
-		return nil, fmt.Errorf("failed to decode publish response: %w", err)
+	if len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, &publishResp); err == nil {
+			// If server explicitly says success, return it
+			if publishResp.Success {
+				return &publishResp, nil
+			}
+		}
 	}
 
-	return &publishResp, nil
+	// Try to decode npm-compatible response format
+	var npmResp struct {
+		OK  bool   `json:"ok"`
+		ID  string `json:"id"`
+		Rev string `json:"rev"`
+	}
+	if len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, &npmResp); err == nil && npmResp.OK {
+			// Convert npm response to our format
+			return &PublishResponse{
+				Success: true,
+				Data: PublishData{
+					PackageID:   npmResp.ID,
+					VersionID:   npmResp.Rev,
+					DownloadURL: "", // Not provided in npm format
+					FileSize:    0,  // Not provided in npm format
+					UploadTime:  "", // Not provided in npm format
+				},
+			}, nil
+		}
+	}
+
+	// If we reached here and the HTTP status is 2xx, treat as success for npm-compatible registries
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return &PublishResponse{Success: true}, nil
+	}
+
+	// Otherwise, include body for easier debugging
+	return nil, fmt.Errorf("unexpected publish response (status %d): %s", resp.StatusCode, string(respBody))
 }
 
-func extractPackageInfo(tarballPath string) (*PackageInfo, error) {
-	// Security: Validate the tarball path
-	cleanPath := filepath.Clean(tarballPath)
-	if !strings.HasSuffix(cleanPath, ".tgz") && !strings.HasSuffix(cleanPath, ".tar.gz") {
-		return nil, fmt.Errorf("invalid file type: only .tgz and .tar.gz files are allowed")
-	}
-
-	file, err := os.Open(cleanPath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = file.Close() }()
-
-	gzr, err := gzip.NewReader(file)
+func extractPackageInfoWithTarballData(tarballData []byte) (*PackageInfo, error) {
+	gzr, err := gzip.NewReader(bytes.NewReader(tarballData))
 	if err != nil {
 		return nil, err
 	}
@@ -442,10 +606,10 @@ func extractPackageInfo(tarballPath string) (*PackageInfo, error) {
 				return nil, err
 			}
 
-			// Add dist information to the raw data
+			// Add dist information to the raw data - hash the tarball, not the package.json
 			rawData["dist"] = map[string]interface{}{
-				"integrity": fmt.Sprintf("sha512-%s", generateSHA512(data)),
-				"shasum":    generateSHA256(data),
+				"integrity": fmt.Sprintf("sha512-%s", generateSHA512(tarballData)),
+				"shasum":    generateSHA256(tarballData),
 				"tarball":   fmt.Sprintf("https://registry.npmjs.org/%s/-/%s-%s.tgz", packageInfo.Name, packageInfo.Name, packageInfo.Version),
 			}
 
@@ -534,4 +698,53 @@ func (c *Client) ValidateRegistry() error {
 	}
 
 	return nil
+}
+
+// npmCompatibleLogin attempts npm/verdaccio-style login by PUTing to
+// /-/user/org.couchdb.user:<username> with a CouchDB-style payload.
+func (c *Client) npmCompatibleLogin(req *LoginRequest) (*LoginResponse, error) {
+	username := strings.TrimSpace(req.Name)
+	if username == "" {
+		return nil, fmt.Errorf("username is required")
+	}
+
+	payload := map[string]interface{}{
+		"name":     username,
+		"password": req.Password,
+		"type":     "user",
+	}
+	if req.Email != "" {
+		payload["email"] = req.Email
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal npm login payload: %w", err)
+	}
+
+	endpoint := "/-/user/org.couchdb.user:" + url.PathEscape(username)
+	resp, err := c.makeRequest("PUT", endpoint, body, map[string]string{
+		"Content-Type": "application/json",
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Verdaccio responses may include token or ok:true
+	var res struct {
+		Token string `json:"token"`
+		OK    bool   `json:"ok"`
+		ID    string `json:"id"`
+		Rev   string `json:"rev"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("failed to decode npm login response: %w", err)
+	}
+
+	if res.Token == "" && !res.OK {
+		return nil, fmt.Errorf("npm-compatible login failed")
+	}
+
+	return &LoginResponse{OK: res.OK || res.Token != "", ID: res.ID, Rev: res.Rev, Token: res.Token}, nil
 }

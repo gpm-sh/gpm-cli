@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -59,12 +60,20 @@ func TestLoginFunction(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock server
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "POST", r.Method)
-				assert.Equal(t, "/-/v1/login", r.URL.Path)
-
-				w.WriteHeader(tt.serverStatus)
-				if tt.serverStatus == http.StatusOK {
-					_ = json.NewEncoder(w).Encode(tt.serverResponse)
+				// Handle both primary and fallback login endpoints
+				if r.Method == "POST" && r.URL.Path == "/-/v1/login" {
+					w.WriteHeader(tt.serverStatus)
+					if tt.serverStatus == http.StatusOK {
+						_ = json.NewEncoder(w).Encode(tt.serverResponse)
+					}
+				} else if r.Method == "PUT" && strings.HasPrefix(r.URL.Path, "/-/user/org.couchdb.user:") {
+					// npm-compatible login fallback
+					w.WriteHeader(tt.serverStatus)
+					if tt.serverStatus == http.StatusOK {
+						_ = json.NewEncoder(w).Encode(tt.serverResponse)
+					}
+				} else {
+					w.WriteHeader(http.StatusNotFound)
 				}
 			}))
 			defer server.Close()

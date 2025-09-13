@@ -46,30 +46,6 @@ var (
 		}
 	}
 
-	ErrScopeMissing = func() *GPMError {
-		return &GPMError{
-			Code:    "E_SCOPE_MISSING",
-			Message: "Scoped visibility requires a scoped registry",
-			Hint:    "Use a studio-specific registry URL (e.g., mystudio.gpm.sh) or choose global-public visibility",
-		}
-	}
-
-	ErrGlobalPrivateForbidden = func() *GPMError {
-		return &GPMError{
-			Code:    "E_GLOBAL_PRIVATE_FORBIDDEN",
-			Message: "Global-private is not allowed. Choose global-public or switch to a scoped visibility.",
-			Hint:    "Use --visibility global-public or --visibility scoped-private --studio <slug>.",
-		}
-	}
-
-	ErrForbiddenScope = func(slug string) *GPMError {
-		return &GPMError{
-			Code:    "E_FORBIDDEN_SCOPE",
-			Message: fmt.Sprintf("You do not have publish permission in studio '%s'.", slug),
-			Hint:    "Contact your studio admin or check your permissions.",
-		}
-	}
-
 	ErrDupVersion = func(version, name string) *GPMError {
 		return &GPMError{
 			Code:    "E_DUP_VERSION",

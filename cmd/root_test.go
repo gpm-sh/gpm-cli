@@ -33,11 +33,13 @@ func TestAddCommands(t *testing.T) {
 		"search",
 		"install",
 		"uninstall",
+		"add",
 		"list",
 		"info",
 		"version",
 		"init",
 		"update",
+		"detect",
 	}
 
 	// Verify all expected commands are present

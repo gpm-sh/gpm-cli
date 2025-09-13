@@ -17,21 +17,18 @@ import (
 
 	"github.com/spf13/cobra"
 	"gpm.sh/gpm/gpm-cli/internal/config"
+	"gpm.sh/gpm/gpm-cli/internal/engines"
 	"gpm.sh/gpm/gpm-cli/internal/styling"
 )
 
-// validatePath ensures the path is safe and doesn't escape the destination directory
 func validatePath(filePath, destDir string) error {
-	// Clean the path to resolve any . or .. elements
 	cleanPath := filepath.Clean(filePath)
 
-	// Convert to absolute path
 	absPath, err := filepath.Abs(filepath.Join(destDir, cleanPath))
 	if err != nil {
 		return fmt.Errorf("failed to resolve absolute path: %w", err)
 	}
 
-	// Ensure the absolute path is within the destination directory
 	destAbs, err := filepath.Abs(destDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve destination directory: %w", err)
@@ -44,7 +41,36 @@ func validatePath(filePath, destDir string) error {
 	return nil
 }
 
-// validateGitCommand sanitizes git command arguments
+// isValidPackageURL validates that the package URL is safe and belongs to the expected host
+func isValidPackageURL(packageURL, expectedHost string) bool {
+	parsedURL, err := url.Parse(packageURL)
+	if err != nil {
+		return false
+	}
+
+	// Only allow HTTP and HTTPS protocols
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return false
+	}
+
+	// Ensure the host matches the expected host
+	if parsedURL.Host != expectedHost {
+		return false
+	}
+
+	// Prevent localhost and private IP ranges
+	if strings.HasPrefix(parsedURL.Host, "localhost") ||
+		strings.HasPrefix(parsedURL.Host, "127.") ||
+		strings.HasPrefix(parsedURL.Host, "192.168.") ||
+		strings.HasPrefix(parsedURL.Host, "10.") ||
+		strings.HasPrefix(parsedURL.Host, "172.") {
+		return false
+	}
+
+	return true
+}
+
+//nolint:unused
 func validateGitCommand(args ...string) error {
 	for _, arg := range args {
 		// Reject arguments that could be dangerous
@@ -57,12 +83,11 @@ func validateGitCommand(args ...string) error {
 	return nil
 }
 
+//nolint:unused
 func validateSafetyPath(path string) error {
-	// Check for null bytes
 	if strings.Contains(path, "\x00") {
 		return fmt.Errorf("null byte in path: %s", path)
 	}
-	// Clean the path and check for traversal attempts
 	cleaned := filepath.Clean(path)
 	if cleaned != path && strings.Contains(path, "..") {
 		return fmt.Errorf("path traversal detected: %s", path)
@@ -71,26 +96,54 @@ func validateSafetyPath(path string) error {
 }
 
 var (
-	installGlobal  bool
-	installVersion string
-	installSave    bool
-	installSaveDev bool
+	installGlobal     bool
+	installVersion    string
+	installSave       bool
+	installSaveDev    bool
+	installUnity      bool
+	installUnreal     bool
+	installGodot      bool
+	installCocos      bool
+	installProjectDir string
+	installRegistry   string
 )
 
 var installCmd = &cobra.Command{
 	Use:   "install [package[@version]...]",
-	Short: "Install packages",
-	Long: `Install packages from the registry.
+	Short: "Install packages with multi-engine support",
+	Long: `Install packages with automatic game engine detection.
 
-Examples:
-  gpm install                              # Install from package.json
-  gpm install package-name                 # Install package
+GPM automatically detects your game engine project and uses the appropriate
+package management system. Supports Unity, Unreal Engine, Godot, and Cocos Creator.
+
+Engine Detection:
+  Unity        - Looks for Assets/, ProjectSettings/, Packages/manifest.json
+  Unreal       - Looks for .uproject files and Content/ directory
+  Godot        - Looks for project.godot file
+  Cocos Creator - Looks for project.json and assets/ directory
+
+Engine-Specific Installation:
+  Unity        - Modifies Packages/manifest.json and configures scoped registries
+  Unreal       - Manages plugins directory (future release)
+  Godot        - Manages addons/ folder (future release)
+  Cocos Creator - Handles extensions (future release)
+
+Basic Examples:
+  gpm install                              # Install from package.json (auto-detect engine)
+  gpm install package-name                 # Install package (auto-detect engine)
   gpm install package-name@1.0.0           # Install specific version
-  gpm install package-name@^1.0.0          # Install with version range
   gpm install pkg1 pkg2 pkg3               # Install multiple packages
-  gpm install --save package-name          # Save to dependencies
-  gpm install --save-dev test-utils        # Save to devDependencies
-  
+
+Engine-Specific Examples:
+  gpm install --unity com.unity.textmeshpro     # Force Unity engine
+  gpm install --unreal adjust-sdk               # Force Unreal engine
+  gpm install --godot godot-analytics           # Force Godot engine
+  gpm install --cocos cocos-analytics           # Force Cocos Creator engine
+
+Registry Examples:
+  gpm install --registry https://homa.gpm.sh homa-analytics
+  gpm install --project-dir /path/to/project package-name
+
 Advanced:
   gpm install git+https://github.com/user/repo.git  # Install from Git
   gpm install file:../local-package                 # Install from local directory`,
@@ -102,36 +155,237 @@ func init() {
 	installCmd.Flags().StringVar(&installVersion, "version", "", "Specific version to install")
 	installCmd.Flags().BoolVar(&installSave, "save", false, "Save to package.json dependencies")
 	installCmd.Flags().BoolVar(&installSaveDev, "save-dev", false, "Save to package.json devDependencies")
+
+	// Engine-specific flags
+	installCmd.Flags().BoolVar(&installUnity, "unity", false, "Force Unity engine adapter")
+	installCmd.Flags().BoolVar(&installUnreal, "unreal", false, "Force Unreal Engine adapter")
+	installCmd.Flags().BoolVar(&installGodot, "godot", false, "Force Godot engine adapter")
+	installCmd.Flags().BoolVar(&installCocos, "cocos", false, "Force Cocos Creator engine adapter")
+
+	// Advanced options
+	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Project directory (default: current directory)")
+	installCmd.Flags().StringVar(&installRegistry, "registry", "", "Override registry URL for this installation")
 }
 
 func install(cmd *cobra.Command, args []string) error {
+	// Handle no arguments - install from package.json
 	if len(args) == 0 {
 		return installFromPackageJSON()
 	}
 
-	fmt.Println(styling.Header("📦  Package Installation"))
+	fmt.Println(styling.Header("📦  Multi-Engine Package Installation"))
 	fmt.Println(styling.Separator())
 
+	// Global installation not supported yet
 	if installGlobal {
 		return fmt.Errorf("%s\n\n%s",
 			styling.Error("Global package installation not yet supported"),
-			styling.Hint("Use local installation instead"))
+			styling.Hint("Use engine-specific local installation instead"))
 	}
 
-	// Install multiple packages
+	// Determine project directory
+	projectDir := installProjectDir
+	if projectDir == "" {
+		var err error
+		projectDir, err = os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get current directory: %w", err)
+		}
+	}
+
+	// Detect or determine engine type
+	engineType, detectionResult, err := determineEngineType(projectDir)
+	if err != nil {
+		return fmt.Errorf("engine detection failed: %w", err)
+	}
+
+	// Show detection results
+	if detectionResult != nil {
+		fmt.Printf("%s %s\n", styling.Label("Detected Engine:"), styling.Value(detectionResult.Engine.String()))
+		fmt.Printf("%s %s\n", styling.Label("Confidence:"), styling.Value(detectionResult.Confidence.String()))
+		if detectionResult.Version != "" {
+			fmt.Printf("%s %s\n", styling.Label("Version:"), styling.Value(detectionResult.Version))
+		}
+		fmt.Printf("%s %s\n", styling.Label("Project Path:"), styling.File(detectionResult.ProjectPath))
+		fmt.Println(styling.Separator())
+	}
+
+	// Get engine adapter
+	adapter, err := engines.GetAdapter(engineType)
+	if err != nil {
+		return fmt.Errorf("failed to get engine adapter: %w", err)
+	}
+
+	// Validate project
+	if err := adapter.ValidateProject(projectDir); err != nil {
+		return fmt.Errorf("project validation failed: %w", err)
+	}
+
+	// Install each package
 	for _, specStr := range args {
 		spec := parsePackageSpec(specStr)
 
+		// Override version if specified
 		if installVersion != "" && len(args) == 1 && spec.Source == "registry" {
 			spec.Version = installVersion
 		}
 
-		if err := installPackageBySpec(spec); err != nil {
-			return err
+		// Install package using engine adapter
+		if err := installPackageWithEngine(adapter, projectDir, spec); err != nil {
+			return fmt.Errorf("failed to install %s: %w", spec.Name, err)
 		}
 	}
 
+	fmt.Println(styling.Success("✓ All packages installed successfully!"))
 	return nil
+}
+
+// determineEngineType determines the engine type based on flags or auto-detection
+func determineEngineType(projectDir string) (engines.EngineType, *engines.DetectionResult, error) {
+	// Check for explicit engine flags
+	engineFlags := []bool{installUnity, installUnreal, installGodot, installCocos}
+	engineTypes := []engines.EngineType{engines.EngineUnity, engines.EngineUnreal, engines.EngineGodot, engines.EngineCocos}
+
+	flagCount := 0
+	var selectedEngine engines.EngineType
+	for i, flag := range engineFlags {
+		if flag {
+			flagCount++
+			selectedEngine = engineTypes[i]
+		}
+	}
+
+	// Error if multiple engines specified
+	if flagCount > 1 {
+		return engines.EngineUnknown, nil, fmt.Errorf("%s\n\n%s",
+			styling.Error("Multiple engine flags specified"),
+			styling.Hint("Use only one engine flag: --unity, --unreal, --godot, or --cocos"))
+	}
+
+	// If engine explicitly specified, return it
+	if flagCount == 1 {
+		fmt.Printf("%s %s\n", styling.Label("Forced Engine:"), styling.Value(selectedEngine.String()))
+		return selectedEngine, nil, nil
+	}
+
+	// Auto-detect engine
+	fmt.Printf("%s %s\n", styling.Label("Auto-detecting engine in:"), styling.File(projectDir))
+
+	results, err := engines.DetectEngine(projectDir)
+	if err != nil {
+		return engines.EngineUnknown, nil, fmt.Errorf("engine detection failed: %w", err)
+	}
+
+	if len(results) == 0 {
+		return engines.EngineUnknown, nil, fmt.Errorf("%s\n\n%s\n%s\n%s\n%s\n%s",
+			styling.Error("No game engine project detected"),
+			styling.Hint("GPM looked for:"),
+			styling.Value("  • Unity: Assets/, ProjectSettings/, Packages/manifest.json"),
+			styling.Value("  • Unreal: *.uproject files and Content/ directory"),
+			styling.Value("  • Godot: project.godot file"),
+			styling.Value("  • Cocos Creator: project.json and assets/ directory"))
+	}
+
+	best := results.Best()
+
+	// Handle ambiguous detection
+	if results.HasAmbiguous() {
+		fmt.Println(styling.Warning("⚠ Multiple engines detected:"))
+		for i, result := range results {
+			if result.Confidence >= engines.ConfidenceHigh {
+				fmt.Printf("  %d. %s (%s confidence)\n", i+1, result.Engine.String(), result.Confidence.String())
+			}
+		}
+		return engines.EngineUnknown, nil, fmt.Errorf("%s\n\n%s",
+			styling.Error("Ambiguous engine detection"),
+			styling.Hint("Use an explicit engine flag: --unity, --unreal, --godot, or --cocos"))
+	}
+
+	// Check confidence level
+	if best.Confidence < engines.ConfidenceMedium {
+		return engines.EngineUnknown, best, fmt.Errorf("%s\n\n%s\n%s",
+			styling.Error(fmt.Sprintf("Low confidence engine detection: %s (%s)", best.Engine.String(), best.Confidence.String())),
+			styling.Hint("Use an explicit engine flag to force engine type:"),
+			styling.Value("  gpm install --unity package-name"))
+	}
+
+	return best.Engine, best, nil
+}
+
+// installPackageWithEngine installs a package using the appropriate engine adapter
+func installPackageWithEngine(adapter engines.EngineAdapter, projectDir string, spec PackageSpec) error {
+	switch spec.Source {
+	case "registry":
+		return installFromRegistryWithEngine(adapter, projectDir, spec)
+	case "git":
+		return installFromGitWithEngine(spec)
+	case "file":
+		return installFromFileWithEngine(spec)
+	default:
+		return fmt.Errorf("unsupported package source: %s", spec.Source)
+	}
+}
+
+// installFromRegistryWithEngine installs a package from registry using engine adapter
+func installFromRegistryWithEngine(adapter engines.EngineAdapter, projectDir string, spec PackageSpec) error {
+	fmt.Printf("%s %s@%s\n", styling.Label("Installing:"), styling.Package(spec.Name), styling.Version(spec.Version))
+
+	// Use default or override registry
+	registryURL := "https://registry.gpm.sh" // Default GPM registry
+	if installRegistry != "" {
+		registryURL = installRegistry
+		fmt.Printf("%s %s\n", styling.Label("Registry (override):"), styling.URL(installRegistry))
+	} else {
+		fmt.Printf("%s %s\n", styling.Label("Registry:"), styling.URL(registryURL))
+	}
+
+	// Resolve version if it's "latest" or "*"
+	resolvedVersion := spec.Version
+	if spec.Version == "latest" || spec.Version == "*" {
+		actualVersion, err := resolveLatestVersionFromRegistry(spec.Name, registryURL)
+		if err != nil {
+			return fmt.Errorf("failed to resolve latest version: %w", err)
+		}
+		resolvedVersion = actualVersion
+		fmt.Printf("%s %s@%s (resolved from %s)\n", styling.Label("Resolved:"), styling.Package(spec.Name), styling.Version(resolvedVersion), styling.Version(spec.Version))
+	}
+
+	// Create install request
+	req := &engines.PackageInstallRequest{
+		Name:     spec.Name,
+		Version:  resolvedVersion,
+		Registry: registryURL,
+		IsDev:    installSaveDev,
+	}
+
+	// Install package
+	result, err := adapter.InstallPackage(projectDir, req)
+	if err != nil {
+		return fmt.Errorf("installation failed: %w", err)
+	}
+
+	if result.Success {
+		fmt.Printf("%s %s\n", styling.Success("✓"), result.Message)
+		if result.Details != nil {
+			for key, value := range result.Details {
+				fmt.Printf("%s %v\n", styling.Label(fmt.Sprintf("  %s:", key)), value)
+			}
+		}
+	} else {
+		return fmt.Errorf("installation reported failure: %s", result.Message)
+	}
+
+	return nil
+}
+
+// installFromGitWithEngine installs a package from git using engine adapter (placeholder)
+func installFromGitWithEngine(spec PackageSpec) error {
+	return fmt.Errorf("git installation with engine adapters not yet implemented")
+}
+
+// installFromFileWithEngine installs a package from file using engine adapter (placeholder)
+func installFromFileWithEngine(spec PackageSpec) error {
+	return fmt.Errorf("file installation with engine adapters not yet implemented")
 }
 
 type PackageSpec struct {
@@ -144,27 +398,24 @@ type PackageSpec struct {
 }
 
 func parsePackageSpec(spec string) PackageSpec {
-	// Handle Git URLs
 	if strings.HasPrefix(spec, "git+") {
 		return parseGitSpec(spec)
 	}
 
-	// Handle file URLs
 	if strings.HasPrefix(spec, "file:") {
 		return parseFileSpec(spec)
 	}
 
-	// Handle npm scoped packages (@scope/package@version)
-	if strings.HasPrefix(spec, "@") {
-		return parseNpmScopedSpec(spec)
-	}
-
-	// Handle UPM packages and regular packages with version (package@version)
 	if strings.Contains(spec, "@") {
 		parts := strings.Split(spec, "@")
+		version := parts[1]
+		// Handle "*" as a wildcard for latest version
+		if version == "*" {
+			version = "latest"
+		}
 		return PackageSpec{
 			Name:    parts[0],
-			Version: parts[1],
+			Version: version,
 			Source:  "registry",
 		}
 	}
@@ -172,29 +423,6 @@ func parsePackageSpec(spec string) PackageSpec {
 	return PackageSpec{
 		Name:    spec,
 		Version: "latest",
-		Source:  "registry",
-	}
-}
-
-func parseNpmScopedSpec(spec string) PackageSpec {
-	// Handle npm scoped packages: @scope/package or @scope/package@version
-	// Examples: @mycompany/package, @mycompany/package@1.0.0
-
-	// Remove leading @
-	withoutAt := strings.TrimPrefix(spec, "@")
-
-	// Split by @ to separate name and version
-	parts := strings.Split(withoutAt, "@")
-	scopedName := "@" + parts[0] // Restore the @ for the scoped name
-
-	version := "latest"
-	if len(parts) > 1 {
-		version = parts[1]
-	}
-
-	return PackageSpec{
-		Name:    scopedName,
-		Version: version,
 		Source:  "registry",
 	}
 }
@@ -273,6 +501,10 @@ func installFromPackageJSON() error {
 
 	// Install production dependencies
 	for name, version := range pkg.Dependencies {
+		// Handle "*" as a wildcard for latest version
+		if version == "*" {
+			version = "latest"
+		}
 		if err := downloadAndInstallPackage(name, version, false); err != nil {
 			fmt.Printf("%s %s@%s\n", styling.Error("✗ Failed to install"), name, version)
 			return err
@@ -282,6 +514,10 @@ func installFromPackageJSON() error {
 
 	// Install dev dependencies
 	for name, version := range pkg.DevDependencies {
+		// Handle "*" as a wildcard for latest version
+		if version == "*" {
+			version = "latest"
+		}
 		if err := downloadAndInstallPackage(name, version, true); err != nil {
 			fmt.Printf("%s %s@%s (dev)\n", styling.Error("✗ Failed to install"), name, version)
 			return err
@@ -292,6 +528,7 @@ func installFromPackageJSON() error {
 	return nil
 }
 
+//nolint:unused
 func installPackageBySpec(spec PackageSpec) error {
 	switch spec.Source {
 	case "registry":
@@ -305,6 +542,7 @@ func installPackageBySpec(spec PackageSpec) error {
 	}
 }
 
+//nolint:unused
 func installFromRegistry(spec PackageSpec) error {
 	fmt.Printf("%s %s@%s\n",
 		styling.Label("Installing:"),
@@ -331,6 +569,7 @@ func installFromRegistry(spec PackageSpec) error {
 	return nil
 }
 
+//nolint:unused
 func installFromGit(spec PackageSpec) error {
 	fmt.Printf("%s %s from %s#%s\n", styling.Label("Installing:"), styling.Package(spec.Name), styling.URL(spec.URL), styling.Version(spec.Branch))
 
@@ -352,6 +591,7 @@ func installFromGit(spec PackageSpec) error {
 	return nil
 }
 
+//nolint:unused
 func installFromFile(spec PackageSpec) error {
 	fmt.Printf("%s %s from %s\n", styling.Label("Installing:"), styling.Package(spec.Name), styling.Value(spec.FilePath))
 
@@ -676,6 +916,7 @@ func compareVersions(a, b []int) int {
 	return 0
 }
 
+//nolint:unused
 func cloneAndInstallGitPackage(spec PackageSpec) error {
 	packagesDir := "Packages"
 	packageDir := filepath.Join(packagesDir, spec.Name)
@@ -731,6 +972,7 @@ func cloneAndInstallGitPackage(spec PackageSpec) error {
 	return nil
 }
 
+//nolint:unused
 func copyLocalPackage(spec PackageSpec) error {
 	packagesDir := "Packages"
 	packageDir := filepath.Join(packagesDir, spec.Name)
@@ -784,6 +1026,7 @@ func copyLocalPackage(spec PackageSpec) error {
 	return nil
 }
 
+//nolint:unused
 func copyDir(src, dst string) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -957,6 +1200,7 @@ func updateUnityManifest(packageName, version string, isDev bool) error {
 	return os.WriteFile(manifestPath, updatedData, 0600)
 }
 
+//nolint:unused
 func updatePackageJSON(packageName, version string, isDev bool) error {
 	packageJSONPath := "package.json"
 	var pkg map[string]interface{}
@@ -998,4 +1242,102 @@ func updatePackageJSON(packageName, version string, isDev bool) error {
 	}
 
 	return os.WriteFile(packageJSONPath, updatedData, 0600)
+}
+
+// resolveLatestVersionFromRegistry fetches the latest version from a registry
+func resolveLatestVersionFromRegistry(packageName, registryURL string) (string, error) {
+	// Parse the registry URL
+	baseURL, err := url.Parse(registryURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid registry URL: %w", err)
+	}
+
+	// Construct the package info URL
+	packageURL := baseURL.JoinPath(packageName).String()
+
+	// Validate URL to prevent SSRF attacks
+	if !isValidPackageURL(packageURL, baseURL.Host) {
+		return "", fmt.Errorf("invalid package URL: %s", packageURL)
+	}
+
+	// Fetch package metadata
+	resp, err := http.Get(packageURL) // #nosec G107 -- URL is validated by isValidPackageURL
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch package metadata: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == 404 {
+		return "", fmt.Errorf("package not found: %s", packageName)
+	}
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("registry error (HTTP %d) for package: %s", resp.StatusCode, packageName)
+	}
+
+	// Parse the response
+	var packageInfo map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&packageInfo); err != nil {
+		return "", fmt.Errorf("failed to parse package metadata: %w", err)
+	}
+
+	// First try to get the latest version from dist-tags
+	if distTags, ok := packageInfo["dist-tags"].(map[string]interface{}); ok {
+		if latest, ok := distTags["latest"].(string); ok && latest != "" {
+			return latest, nil
+		}
+	}
+
+	// If no dist-tags or latest tag, get all versions and find the highest one
+	versions, ok := packageInfo["versions"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("no versions available for package: %s", packageName)
+	}
+
+	if len(versions) == 0 {
+		return "", fmt.Errorf("no versions available for package: %s", packageName)
+	}
+
+	// Get all version strings and sort them
+	var versionStrings []string
+	for version := range versions {
+		versionStrings = append(versionStrings, version)
+	}
+
+	fmt.Printf("%s Available versions: %v\n", styling.Label("Found"), versionStrings)
+
+	// Find the highest version using semantic versioning
+	latestVersion, err := findHighestVersion(versionStrings)
+	if err != nil {
+		return "", fmt.Errorf("failed to determine latest version: %w", err)
+	}
+
+	return latestVersion, nil
+}
+
+// findHighestVersion finds the highest semantic version from a list of version strings
+func findHighestVersion(versions []string) (string, error) {
+	if len(versions) == 0 {
+		return "", fmt.Errorf("no versions provided")
+	}
+
+	var highestVersion string
+	var highestParts []int
+
+	for _, version := range versions {
+		parts := parseVersion(version)
+		if len(parts) == 0 {
+			continue // Skip invalid versions
+		}
+
+		if highestVersion == "" || compareVersions(parts, highestParts) > 0 {
+			highestVersion = version
+			highestParts = parts
+		}
+	}
+
+	if highestVersion == "" {
+		return "", fmt.Errorf("no valid versions found")
+	}
+
+	return highestVersion, nil
 }

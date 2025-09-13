@@ -21,10 +21,11 @@ import (
 )
 
 var (
-	packDryRun      bool
-	packJSON        bool
-	packDestination string
-	packScope       string
+	packDryRun        bool
+	packJSON          bool
+	packDestination   string
+	packScope         string
+	packIgnoreScripts bool
 )
 
 var packCmd = &cobra.Command{
@@ -44,7 +45,7 @@ Examples:
   gpm pack --dry-run             # Show what would be packed
   gpm pack --json                # Output in JSON format
   gpm pack --pack-destination /tmp  # Output to specific directory
-  gpm pack --scope=@myscope      # Pack with specific scope`,
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return packPackages(cmd, args)
 	},
@@ -55,6 +56,7 @@ func init() {
 	packCmd.Flags().BoolVar(&packJSON, "json", false, "Output results in JSON format")
 	packCmd.Flags().StringVar(&packDestination, "pack-destination", "", "Specify output directory (default: current directory)")
 	packCmd.Flags().StringVar(&packScope, "scope", "", "Scope for scoped packages (e.g., @myscope)")
+	packCmd.Flags().BoolVar(&packIgnoreScripts, "ignore-scripts", false, "Skip running package scripts during packing")
 }
 
 type PackResult struct {
@@ -84,16 +86,145 @@ func packPackages(cmd *cobra.Command, args []string) error {
 		packageSpecs = args
 	}
 
-	var results []PackResult
-	var allErrors []string
+	// npm behavior: validate all manifests first before creating any tarballs
+	type packageManifest struct {
+		spec         string
+		pkg          *validation.PackageJSON
+		sourceDir    string
+		filterResult *filtering.FilterResult
+	}
 
+	var manifests []packageManifest
+	var validationErrors []string
+
+	// First pass: validate all packages
 	for _, spec := range packageSpecs {
-		result, err := packSinglePackage(spec)
-		if err != nil {
-			allErrors = append(allErrors, fmt.Sprintf("%s: %v", spec, err))
+		specType := packaging.DetectPackageSpecType(spec)
+		if specType == "tarball" {
+			// For tarballs, we'll handle them separately as they don't need validation
 			continue
 		}
+
+		if specType == "folder_no_package_json" {
+			validationErrors = append(validationErrors, fmt.Sprintf("%s: no package.json found", spec))
+			continue
+		}
+
+		if specType == "unknown" {
+			validationErrors = append(validationErrors, fmt.Sprintf("%s: invalid package spec", spec))
+			continue
+		}
+
+		validationResult, err := validation.ValidatePackage(spec)
+		if err != nil {
+			validationErrors = append(validationErrors, fmt.Sprintf("%s: validation failed: %v", spec, err))
+			continue
+		}
+
+		// npm error message: "Invalid package, must have name and version" - check this first
+		if validationResult.Package.Name == "" || validationResult.Package.Version == "" {
+			validationErrors = append(validationErrors, fmt.Sprintf("%s: Invalid package, must have name and version", spec))
+			continue
+		}
+
+		if !validationResult.Valid {
+			validationErrors = append(validationErrors, fmt.Sprintf("%s: package validation failed", spec))
+			continue
+		}
+
+		// Handle scope configuration for pack
+		if packScope != "" {
+			if !strings.HasPrefix(packScope, "@") {
+				validationErrors = append(validationErrors, fmt.Sprintf("%s: scope must start with @ (e.g., @myscope)", spec))
+				continue
+			}
+		}
+
+		filterEngine, err := filtering.NewFileFilterEngine(spec)
+		if err != nil {
+			validationErrors = append(validationErrors, fmt.Sprintf("%s: failed to create file filter: %v", spec, err))
+			continue
+		}
+
+		filterResult, err := filterEngine.FilterFiles()
+		if err != nil {
+			validationErrors = append(validationErrors, fmt.Sprintf("%s: failed to filter files: %v", spec, err))
+			continue
+		}
+
+		manifests = append(manifests, packageManifest{
+			spec:         spec,
+			pkg:          validationResult.Package,
+			sourceDir:    spec,
+			filterResult: filterResult,
+		})
+	}
+
+	// If any validation errors, bail early
+	if len(validationErrors) > 0 {
+		for _, err := range validationErrors {
+			if !packJSON {
+				fmt.Printf("%s %s\n", styling.Error("✗"), err)
+			}
+		}
+		return fmt.Errorf("failed to validate %d package(s)", len(validationErrors))
+	}
+
+	// Second pass: create tarballs
+	var results []PackResult
+	var allErrors []string
+	processedFiles := make(map[string]bool) // Track processed files to handle overwrites
+
+	// Handle regular packages
+	for _, manifest := range manifests {
+		var result *PackResult
+		var err error
+
+		if packDryRun {
+			result, err = createDryRunResult(manifest.pkg, manifest.filterResult)
+		} else {
+			result, err = createPackage(manifest.sourceDir, manifest.pkg, manifest.filterResult, nil)
+		}
+
+		if err != nil {
+			allErrors = append(allErrors, fmt.Sprintf("%s: %v", manifest.spec, err))
+			continue
+		}
+
+		// npm pack behavior: overwrite if same filename already processed
+		if processedFiles[result.Filename] {
+			// Remove previous result with same filename
+			for i, r := range results {
+				if r.Filename == result.Filename {
+					results = append(results[:i], results[i+1:]...)
+					break
+				}
+			}
+		}
+		processedFiles[result.Filename] = true
 		results = append(results, *result)
+	}
+
+	// Handle tarballs separately
+	for _, spec := range packageSpecs {
+		if packaging.DetectPackageSpecType(spec) == "tarball" {
+			result, err := repackTarball(spec)
+			if err != nil {
+				allErrors = append(allErrors, fmt.Sprintf("%s: %v", spec, err))
+				continue
+			}
+
+			if processedFiles[result.Filename] {
+				for i, r := range results {
+					if r.Filename == result.Filename {
+						results = append(results[:i], results[i+1:]...)
+						break
+					}
+				}
+			}
+			processedFiles[result.Filename] = true
+			results = append(results, *result)
+		}
 	}
 
 	if packJSON {
@@ -113,8 +244,13 @@ func packPackages(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// npm pack behavior: print filenames to stdout with @ and / replaced (even in dry-run)
 	for _, result := range results {
-		printPackResult(result)
+		// Match npm: tar.filename.replace(/^@/, '').replace(/\//, '-')
+		filename := result.Filename
+		filename = strings.TrimPrefix(filename, "@")
+		filename = strings.ReplaceAll(filename, "/", "-")
+		fmt.Println(filename)
 	}
 
 	if len(allErrors) > 0 {
@@ -125,67 +261,6 @@ func packPackages(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-func packSinglePackage(packageSpec string) (*PackResult, error) {
-	specType := packaging.DetectPackageSpecType(packageSpec)
-
-	var sourceDir string
-	var cleanup func()
-
-	switch specType {
-	case "tarball":
-		return repackTarball(packageSpec)
-	case "folder":
-		sourceDir = packageSpec
-	case "folder_no_package_json":
-		return nil, fmt.Errorf("no package.json found in %s", packageSpec)
-	default:
-		return nil, fmt.Errorf("invalid package spec: %s", packageSpec)
-	}
-
-	// Handle scope configuration for pack
-	if packScope != "" {
-		if !strings.HasPrefix(packScope, "@") {
-			return nil, fmt.Errorf("scope must start with @ (e.g., @myscope)")
-		}
-	}
-
-	validationResult, err := validation.ValidatePackage(sourceDir)
-	if err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
-	}
-
-	if !validationResult.Valid {
-		for _, validationErr := range validationResult.Errors {
-			if !packJSON {
-				fmt.Printf("%s %v\n", styling.Warning("⚠"), validationErr)
-			}
-		}
-		return nil, fmt.Errorf("package validation failed")
-	}
-
-	if !packJSON && len(validationResult.Warnings) > 0 {
-		for _, warning := range validationResult.Warnings {
-			fmt.Printf("%s %s\n", styling.Warning("⚠"), warning)
-		}
-	}
-
-	filterEngine, err := filtering.NewFileFilterEngine(sourceDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create file filter: %w", err)
-	}
-
-	filterResult, err := filterEngine.FilterFiles()
-	if err != nil {
-		return nil, fmt.Errorf("failed to filter files: %w", err)
-	}
-
-	if packDryRun {
-		return createDryRunResult(validationResult.Package, filterResult)
-	}
-
-	return createPackage(sourceDir, validationResult.Package, filterResult, cleanup)
 }
 
 func createDryRunResult(pkg *validation.PackageJSON, filterResult *filtering.FilterResult) (*PackResult, error) {
@@ -317,13 +392,12 @@ func createPackage(sourceDir string, pkg *validation.PackageJSON, filterResult *
 		Integrity:    integrity,
 	}
 
-	if !packJSON {
-		fmt.Println(outputFile)
-	}
+	// Output is handled in packPackages function to match npm behavior
 
 	return result, nil
 }
 
+//nolint:unused
 func printPackResult(result PackResult) {
 	fmt.Println(styling.Header("📦  GPM Package Created Successfully"))
 	fmt.Println(styling.Separator())
@@ -361,9 +435,7 @@ func repackTarball(tarballPath string) (*PackResult, error) {
 		PackedSize: info.Size(),
 	}
 
-	if !packJSON {
-		fmt.Printf("%s\n", result.Filename)
-	}
+	// Output is handled in packPackages function to match npm behavior
 
 	return result, nil
 }

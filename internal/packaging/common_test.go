@@ -63,7 +63,7 @@ func TestFilenameValidation(t *testing.T) {
 	validNames := []string{
 		"test-package",
 		"my.package",
-		"@scope/package",
+		"x-package",
 		"com.example.package",
 	}
 

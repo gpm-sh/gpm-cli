@@ -84,19 +84,6 @@ func IsValidPackageNameForFilename(name string) bool {
 		return false
 	}
 
-	// Handle scoped packages (@scope/package)
-	if strings.HasPrefix(name, "@") {
-		// Must be in format @scope/package
-		parts := strings.Split(name, "/")
-		if len(parts) != 2 || !strings.HasPrefix(parts[0], "@") || len(parts[0]) < 2 || len(parts[1]) == 0 {
-			return false
-		}
-		// Validate each part separately
-		scope := parts[0][1:] // Remove @
-		packageName := parts[1]
-		return isValidBasicName(scope) && isValidBasicName(packageName)
-	}
-
 	// For non-scoped packages, don't allow / or @
 	if strings.Contains(name, "/") || strings.Contains(name, "@") {
 		return false

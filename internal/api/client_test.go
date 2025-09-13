@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -55,23 +56,46 @@ func TestClient_Login(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create test server
+			// Create test server that handles both primary and npm-style endpoints
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "POST", r.Method)
-				assert.Equal(t, "/-/v1/login", r.URL.Path)
-				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+				w.Header().Set("Content-Type", "application/json")
 
-				// Verify request body
-				var loginReq LoginRequest
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&loginReq))
-				assert.Equal(t, tt.loginReq.Name, loginReq.Name)
-				assert.Equal(t, tt.loginReq.Password, loginReq.Password)
+				// Handle primary endpoint
+				if r.URL.Path == "/-/v1/login" && r.Method == "POST" {
+					assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
-				// Send response
-				w.WriteHeader(tt.serverStatus)
-				if tt.serverStatus == http.StatusOK {
-					_ = json.NewEncoder(w).Encode(tt.serverResponse)
+					// Verify request body
+					var loginReq LoginRequest
+					require.NoError(t, json.NewDecoder(r.Body).Decode(&loginReq))
+					assert.Equal(t, tt.loginReq.Name, loginReq.Name)
+					assert.Equal(t, tt.loginReq.Password, loginReq.Password)
+
+					// Send response
+					w.WriteHeader(tt.serverStatus)
+					if tt.serverStatus == http.StatusOK {
+						_ = json.NewEncoder(w).Encode(tt.serverResponse)
+					}
+					return
 				}
+
+				// Handle npm-style fallback endpoint
+				if strings.HasPrefix(r.URL.Path, "/-/user/org.couchdb.user:") && r.Method == "PUT" {
+					// For the fallback, we should return the same error
+					w.WriteHeader(tt.serverStatus)
+					if tt.serverStatus == http.StatusOK {
+						// Convert to npm-style response
+						_ = json.NewEncoder(w).Encode(map[string]interface{}{
+							"ok":    true,
+							"id":    "org.couchdb.user:" + tt.loginReq.Name,
+							"rev":   "1-abc123",
+							"token": tt.serverResponse.Token,
+						})
+					}
+					return
+				}
+
+				// Unexpected endpoint
+				w.WriteHeader(http.StatusNotFound)
 			}))
 			defer server.Close()
 

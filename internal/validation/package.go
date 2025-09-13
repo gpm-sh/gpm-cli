@@ -59,7 +59,6 @@ type PackageValidationResult struct {
 
 var (
 	npmNameRegex         = regexp.MustCompile(`^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$`)
-	scopedNameRegex      = regexp.MustCompile(`^@([a-z0-9-~][a-z0-9-._~]*)\/([a-z0-9-~][a-z0-9-._~]*)$`)
 	semanticVersionRegex = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*|[0-9a-zA-Z-]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*|[0-9a-zA-Z-]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
 )
 
@@ -180,9 +179,6 @@ func validateSemanticVersion(version string) error {
 }
 
 func determineRecommendedAccess(name string) AccessLevel {
-	if scopedNameRegex.MatchString(name) {
-		return AccessScoped
-	}
 	return AccessPublic
 }
 
@@ -279,14 +275,8 @@ func validateNpmCompatibility(result *PackageValidationResult) {
 func ValidateAccessLevel(access string, packageName string) error {
 	switch AccessLevel(access) {
 	case AccessPublic:
-		if scopedNameRegex.MatchString(packageName) {
-			return fmt.Errorf("scoped packages cannot use 'public' access level, use 'scoped' or 'private'")
-		}
 		return nil
 	case AccessScoped:
-		if !scopedNameRegex.MatchString(packageName) {
-			return fmt.Errorf("only scoped packages can use 'scoped' access level")
-		}
 		return nil
 	case AccessPrivate:
 		return nil

@@ -27,7 +27,6 @@ var (
 	publishTag      string
 	publishDryRun   bool
 	publishRegistry string
-	publishScope    string
 )
 
 var publishCmd = &cobra.Command{
@@ -56,7 +55,6 @@ Examples:
   gpm publish --access=scoped             # Publish as scoped
   gpm publish --access=private            # Publish as private
   gpm publish --tag=beta                  # Publish with dist-tag
-  gpm publish --scope=@myscope            # Publish with specific scope
   gpm publish --registry=https://npmjs.org # Publish to specific registry
   gpm publish --dry-run                   # Simulate publish`,
 	Args: cobra.MaximumNArgs(1),
@@ -76,7 +74,6 @@ func init() {
 	publishCmd.Flags().StringVar(&publishTag, "tag", "latest", "Dist-tag to publish under")
 	publishCmd.Flags().BoolVar(&publishDryRun, "dry-run", false, "Simulate publish without uploading")
 	publishCmd.Flags().StringVar(&publishRegistry, "registry", "", "Registry URL to publish to (overrides config)")
-	publishCmd.Flags().StringVar(&publishScope, "scope", "", "Scope for scoped packages (e.g., @myscope)")
 }
 
 type PublishInfo struct {
@@ -121,22 +118,11 @@ func publish(packageSpec string) error {
 		return fmt.Errorf("invalid dist-tag: %w", err)
 	}
 
-	// Handle scope configuration
 	packageName := publishInfo.PackageInfo.Name
-	if publishScope != "" {
-		if !strings.HasPrefix(publishScope, "@") {
-			return fmt.Errorf("scope must start with @ (e.g., @myscope)")
-		}
-		if !strings.Contains(packageName, "/") {
-			packageName = publishScope + "/" + strings.TrimPrefix(packageName, "@")
-		} else if !strings.HasPrefix(packageName, publishScope) {
-			return fmt.Errorf("package name %s doesn't match specified scope %s", packageName, publishScope)
-		}
-	}
 
 	actualAccess := publishAccess
 	if actualAccess == "" {
-		actualAccess = string(determineRecommendedAccess(packageName))
+		actualAccess = string(determineRecommendedAccess())
 	}
 
 	if err := validateAccessLevel(actualAccess, packageName); err != nil {
@@ -145,7 +131,7 @@ func publish(packageSpec string) error {
 
 	client := api.NewClient(registry, cfg.Token)
 
-	if err := performPrePublishChecks(client, publishInfo.PackageInfo, actualAccess); err != nil {
+	if err := performPrePublishChecks(); err != nil {
 		return fmt.Errorf("pre-publish validation failed: %w", err)
 	}
 
@@ -161,9 +147,6 @@ func publish(packageSpec string) error {
 	fmt.Printf("%s %s\n", styling.Label("Access Level:"), styling.Value(getAccessDescription(actualAccess)))
 	fmt.Printf("%s %s\n", styling.Label("Tag:"), styling.Value(publishTag))
 	fmt.Printf("%s %s\n", styling.Label("Registry:"), styling.URL(registry))
-	if publishScope != "" {
-		fmt.Printf("%s %s\n", styling.Label("Scope:"), styling.Value(publishScope))
-	}
 	fmt.Printf("%s %s\n", styling.Label("File:"), styling.File(publishInfo.TarballPath))
 	fmt.Printf("%s %d bytes (%.1f kB)\n", styling.Label("Size:"), publishInfo.FileSize, float64(publishInfo.FileSize)/1024)
 	fmt.Printf("%s %s files\n", styling.Label("Files:"), styling.Value(fmt.Sprintf("%d", len(publishInfo.FilteredFiles))))
@@ -181,9 +164,6 @@ func publish(packageSpec string) error {
 		fmt.Printf("  %s %s\n", styling.Label("•"), styling.Value(fmt.Sprintf("Tagged as '%s'", publishTag)))
 		fmt.Printf("  %s %s\n", styling.Label("•"), styling.Value(fmt.Sprintf("Access level: %s", getAccessDescription(actualAccess))))
 		fmt.Printf("  %s %s\n", styling.Label("•"), styling.Value(fmt.Sprintf("Registry: %s", registry)))
-		if publishScope != "" {
-			fmt.Printf("  %s %s\n", styling.Label("•"), styling.Value(fmt.Sprintf("Scope: %s", publishScope)))
-		}
 		fmt.Printf("  %s %d files\n", styling.Label("•"), len(publishInfo.FilteredFiles))
 
 		if len(publishInfo.FilteredFiles) > 0 && len(publishInfo.FilteredFiles) <= 20 {
@@ -329,7 +309,7 @@ func prepareFolderWithFiltering(folderPath string) (*PublishInfo, func(), error)
 	tarballName := fmt.Sprintf("%s-%s.tgz", validationResult.Package.Name, validationResult.Package.Version)
 	tarballPath := filepath.Join(tempDir, tarballName)
 
-	sha1Hash, sha512Hash, filteredFiles, err := createFilteredTarball(folderPath, tarballPath, filterResult)
+	sha1Hash, sha512Hash, filteredFiles, err := createFilteredTarball(tarballPath, filterResult)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("failed to create tarball: %w", err)
@@ -356,7 +336,7 @@ func prepareFolderWithFiltering(folderPath string) (*PublishInfo, func(), error)
 	return publishInfo, cleanup, nil
 }
 
-func createFilteredTarball(srcDir, tarballPath string, filterResult *filtering.FilterResult) ([]byte, []byte, []string, error) {
+func createFilteredTarball(tarballPath string, filterResult *filtering.FilterResult) ([]byte, []byte, []string, error) {
 	file, err := os.Create(tarballPath) // #nosec G304 - Path is validated and safe
 	if err != nil {
 		return nil, nil, nil, err
@@ -452,7 +432,7 @@ func calculateTarballHashes(tarballPath string) ([]byte, []byte, error) {
 	return sha1Hash.Sum(nil), sha512Hash.Sum(nil), nil
 }
 
-func performPrePublishChecks(client *api.Client, pkg *validation.PackageJSON, access string) error {
+func performPrePublishChecks() error {
 	return nil
 }
 
@@ -464,7 +444,7 @@ func validateAccessLevel(access, packageName string) error {
 	return validation.ValidateAccessLevel(access, packageName)
 }
 
-func determineRecommendedAccess(name string) validation.AccessLevel {
+func determineRecommendedAccess() validation.AccessLevel {
 	result, _ := validation.ValidatePackage(".")
 	if result != nil {
 		return result.RecommendedAccess
