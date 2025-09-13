@@ -107,9 +107,7 @@ namespace IntegrationTest
 	assert.FileExists(s.T(), tarball)
 
 	outputStr := string(output)
-	assert.Contains(s.T(), outputStr, "GPM Package Created Successfully")
-	assert.Contains(s.T(), outputStr, "com.integration.test-package")
-	assert.Contains(s.T(), outputStr, "1.0.0")
+	// Pack command follows npm pack behavior - only outputs filename
 	assert.Contains(s.T(), outputStr, tarball)
 }
 
