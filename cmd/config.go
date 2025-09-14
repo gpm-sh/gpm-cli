@@ -53,7 +53,11 @@ func showConfig() error {
 	fmt.Printf("%s %s\n", styling.Label("Username:"), styling.Value(cfg.Username))
 
 	if cfg.Token != "" {
-		fmt.Printf("%s %s\n", styling.Label("Token:"), styling.Muted(cfg.Token[:20]+"..."))
+		tokenDisplay := cfg.Token
+		if len(cfg.Token) > 20 {
+			tokenDisplay = cfg.Token[:20] + "..."
+		}
+		fmt.Printf("%s %s\n", styling.Label("Token:"), styling.Muted(tokenDisplay))
 	} else {
 		fmt.Printf("%s %s\n", styling.Label("Token:"), styling.Warning("Not set"))
 	}
