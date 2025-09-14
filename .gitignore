@@ -69,6 +69,9 @@ test-results/
 /docs/_build/
 /docs/.doctrees/
 
+# Documentation repository (cloned separately)
+/.local/docs/
+
 # Backup files
 *.bak
 *.backup

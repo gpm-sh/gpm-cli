@@ -29,7 +29,7 @@ var config *Config
 
 func InitConfig() {
 	// Set default values
-	viper.SetDefault("registry", "https://gpm.sh")
+	viper.SetDefault("registry", "https://registry.gpm.sh")
 	viper.SetDefault("token", "")
 	viper.SetDefault("username", "")
 
@@ -83,7 +83,7 @@ func GetConfig() *Config {
 	if config == nil {
 		// Fallback to default config if InitConfig fails
 		config = &Config{
-			Registry: "https://gpm.sh",
+			Registry: "https://registry.gpm.sh",
 			Token:    "",
 			Username: "",
 		}
