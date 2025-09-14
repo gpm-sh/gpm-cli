@@ -76,7 +76,8 @@ coverage/`
 	for _, expected := range expectedFiles {
 		found := false
 		for _, file := range result.Files {
-			if file.RelativePath == expected {
+			// Normalize paths for cross-platform compatibility
+			if filepath.ToSlash(file.RelativePath) == expected {
 				found = true
 				break
 			}
@@ -90,7 +91,8 @@ coverage/`
 	excludedFiles := []string{"test/test.js", "node_modules/lodash/index.js", ".git/config", "coverage/report.html"}
 	for _, excluded := range excludedFiles {
 		for _, file := range result.Files {
-			if file.RelativePath == excluded {
+			// Normalize paths for cross-platform compatibility
+			if filepath.ToSlash(file.RelativePath) == excluded {
 				t.Errorf("Excluded file %s found in filtered results", excluded)
 			}
 		}
@@ -192,7 +194,8 @@ coverage/`
 	for _, expected := range shouldBeIncluded {
 		found := false
 		for _, included := range includedFiles {
-			if included == expected {
+			// Normalize paths for cross-platform compatibility
+			if filepath.ToSlash(included) == expected {
 				found = true
 				break
 			}
@@ -204,7 +207,8 @@ coverage/`
 
 	for _, excluded := range shouldBeExcluded {
 		for _, included := range includedFiles {
-			if included == excluded {
+			// Normalize paths for cross-platform compatibility
+			if filepath.ToSlash(included) == excluded {
 				t.Errorf("Expected file %s to be excluded but was included. Included files: %v", excluded, includedFiles)
 			}
 		}

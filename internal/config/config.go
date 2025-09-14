@@ -164,6 +164,11 @@ func SetConfigForTesting(testConfig *Config) {
 	config = testConfig
 }
 
+// ResetConfigForTesting resets the global config to nil for testing
+func ResetConfigForTesting() {
+	config = nil
+}
+
 func validateConfig(cfg *Config) error {
 	if cfg.Registry != "" {
 		if _, err := url.Parse(cfg.Registry); err != nil {

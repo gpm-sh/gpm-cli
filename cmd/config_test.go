@@ -15,7 +15,10 @@ func TestConfigCommand(t *testing.T) {
 	// Setup temporary config for testing
 	tempDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
-	defer func() { _ = os.Setenv("HOME", originalHome) }()
+	defer func() {
+		_ = os.Setenv("HOME", originalHome)
+		config.ResetConfigForTesting()
+	}()
 	_ = os.Setenv("HOME", tempDir)
 
 	// Initialize config
@@ -92,7 +95,10 @@ func TestConfigCmdIntegration(t *testing.T) {
 	// Setup temporary config for testing
 	tempDir := t.TempDir()
 	originalHome := os.Getenv("HOME")
-	defer func() { _ = os.Setenv("HOME", originalHome) }()
+	defer func() {
+		_ = os.Setenv("HOME", originalHome)
+		config.ResetConfigForTesting()
+	}()
 	_ = os.Setenv("HOME", tempDir)
 
 	// Test subcommands exist
@@ -119,11 +125,20 @@ func TestConfigCmdIntegration(t *testing.T) {
 }
 
 func TestConfigPersistence(t *testing.T) {
+	// Setup temporary config for testing
+	tempDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	defer func() {
+		_ = os.Setenv("HOME", originalHome)
+		config.ResetConfigForTesting()
+	}()
+	_ = os.Setenv("HOME", tempDir)
+
 	// Test that config values can be set and retrieved
 	config.InitConfig()
 
 	// Set some values
-	testRegistry := "https://persistent-test.example.com"
+	testRegistry := "https://registry.gpm.sh"
 	testUsername := "persistentuser"
 
 	err := setConfig("registry", testRegistry)
