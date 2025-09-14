@@ -23,7 +23,7 @@ func TestInitConfig(t *testing.T) {
 				return tmpDir
 			},
 			expected: &Config{
-				Registry: "https://gpm.sh",
+				Registry: "https://registry.gpm.sh",
 				Token:    "",
 				Username: "",
 			},
